@@ -61,7 +61,7 @@ function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#home"><span className="brand-mark">i</span> ilot</a>
+        <a className="brand" href="#home"><span className="brand-mark">W</span> Workspan</a>
         <p className="nav-label">WORKSPACE</p>
         <a className="nav-item active" href="#home"><span>▦</span> Overview</a>
         <a className="nav-item" href="#organizations"><span>◫</span> Organizations</a>
@@ -87,7 +87,7 @@ function App() {
             <form className="create-form" onSubmit={createOrganization}><label htmlFor="organization-name">Create an organization</label><div className="input-row"><input id="organization-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Acme Studio" maxLength={50} /><button className="primary-button" type="submit">Create organization</button></div></form>
             {loading ? <div className="empty-state">Loading your workspace…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Your workspace is ready</strong><p>Create your first organization to start setting up spaces and projects.</p></div> : <div className="org-list">{organizations.map(org => <article className="org-row" key={org.id}><div className="org-mark">{org.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{org.name}</strong><small>Created {new Date(org.createdAt).toLocaleDateString()}</small></div><div className="org-metric"><strong>{org.spaces}</strong><small>Spaces</small></div><div className="org-metric"><strong>{org.projects}</strong><small>Projects</small></div><div className="org-metric"><strong>{org.tasks}</strong><small>Tasks</small></div><button className="icon-button" aria-label={`Open ${org.name}`}>↗</button></article>)}</div>}
           </section>
-          <footer>© 2026 ilot <span>·</span> Built for teams that move work forward.</footer>
+          <footer>© 2026 Workspan <span>·</span> Built for teams that move work forward.</footer>
         </div>
       </section>
     </main>
