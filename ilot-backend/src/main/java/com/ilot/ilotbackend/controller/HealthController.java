@@ -11,5 +11,6 @@ public class HealthController {
         return new HealthResponse("Backend Spring Boot opérationnel !");
     }
 
-    public record HealthResponse(String message) {}
+    public record HealthResponse(String message) {
+    }
 }
