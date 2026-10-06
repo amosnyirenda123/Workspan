@@ -9,14 +9,27 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ilot_local_password}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_local_password}
     ports:
-      - "3307:3307"
+      - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - workspan_mysql_data:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
+  phpmyadmin:
+    image: phpmyadmin:5.2-apache
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: ilot
+      PMA_PASSWORD: ${MYSQL_PASSWORD:-ilot_local_password}
+    ports:
+      - "8081:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
   backend:
     build: ./ilot-backend
     restart: unless-stopped
@@ -38,4 +51,4 @@ services:
     depends_on:
       - backend
 volumes:
-  mysql_data:
+  workspan_mysql_data:

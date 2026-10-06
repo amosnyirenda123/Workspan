@@ -13,5 +13,7 @@ public class OrganizationController {
     public OrganizationController(OrganizationService service) { this.service=service; }
     @GetMapping public List<OrganizationResponse> findAll() { return service.findAll(); }
     @GetMapping("/{id}") public OrganizationResponse findById(@PathVariable UUID id) { return service.findById(id); }
-    @PostMapping @ResponseStatus(HttpStatus.CREATED) public OrganizationResponse create(@Valid @RequestBody OrganizationRequest request) { return service.create(request); }
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public OrganizationResponse create(@Valid @RequestBody OrganizationRequest request) { return service.create(request); }
 }

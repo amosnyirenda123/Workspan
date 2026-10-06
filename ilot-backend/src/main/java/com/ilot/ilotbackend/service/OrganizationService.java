@@ -23,7 +23,8 @@ public class OrganizationService {
     @Transactional public OrganizationResponse create(OrganizationRequest request) {
         String name=request.name().trim();
         if (organizations.existsByNameIgnoreCase(name)) throw new ResponseStatusException(HttpStatus.CONFLICT,"An organization with this name already exists");
-        return response(organizations.save(mapper.toEntity(new OrganizationRequest(name))));
+        OrganizationRequest normalized = new OrganizationRequest(name, request.description(), request.website(), request.contactEmail(), request.phone());
+        return response(organizations.save(mapper.toEntity(normalized)));
     }
     private OrganizationResponse response(Organization organization) {
         UUID id=organization.getId();

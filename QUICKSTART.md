@@ -6,9 +6,9 @@ This starter runs a Spring Boot API, a React/TypeScript dashboard, and MySQL.
 
 1. Copy `.env.example` to `.env` and choose local database passwords.
 2. From the repository root, run `docker compose up --build`.
-3. Open the dashboard at <http://localhost:5173>. The API is at <http://localhost:8080/api/organizations>.
+3. Open the dashboard at <http://localhost:5173>. Open phpMyAdmin at <http://localhost:8081> to inspect the `ilot` database (Compose connects it with the `ilot` database user). Open <http://localhost:8080> to see the backend startup response.
 
-The MySQL data is kept in the `mysql_data` volume. Hibernate uses `ddl-auto=update` for this early development setup; switch to versioned Flyway migrations before production. Do not use the sample passwords outside local development.
+MySQL creates the `ilot` database on first startup and keeps it in the `workspan_mysql_data` volume. Hibernate creates and updates the entity tables for this development setup. Do not use the sample passwords outside local development.
 
 ## Run services without Docker
 
@@ -18,9 +18,10 @@ The MySQL data is kept in the `mysql_data` volume. Hibernate uses `ddl-auto=upda
 
 ## Initial API
 
+- `GET /api/health` — returns `{ "message": "Backend Spring Boot opérationnel !" }`.
 - `GET /api/organizations` — list organizations with space, project, and task counts.
 - `GET /api/organizations/{id}` — fetch one organization summary.
-- `POST /api/organizations` — create an organization with `{ "name": "Acme" }`.
+- `POST /api/organizations` — create an organization with `name` and optional `description`, `website`, `contactEmail`, and `phone` fields.
 
 ## Backend layout
 
