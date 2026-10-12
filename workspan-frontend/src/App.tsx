@@ -1,25 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { authService } from './api/authService'
+import { getApiErrorMessage } from './api/http'
+import { organizationService } from './api/organizationService'
+import type { AuthUser, Organization } from './api/types'
+import { WorkspaceCrud } from './features/workspace/WorkspaceCrud'
 import './App.css'
 
-type Organization = {
-  id: string
-  name: string
-  description: string | null
-  website: string | null
-  contactEmail: string | null
-  phone: string | null
-  spaces: number
-  projects: number
-  tasks: number
-  createdAt: string
-}
-
-type ApiError = { detail?: string; message?: string }
-type OrganizationForm = { name: string; description: string; website: string; contactEmail: string; phone: string }
 type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
-type AuthUser = { userId: string; displayName: string; email: string; organizationId: string; organizationName: string }
 
-const emptyOrganizationForm: OrganizationForm = { name: '', description: '', website: '', contactEmail: '', phone: '' }
 
 function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname)
@@ -27,9 +15,6 @@ function App() {
   const [listLoading, setListLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [search, setSearch] = useState('')
-  const [organizationForm, setOrganizationForm] = useState<OrganizationForm>(emptyOrganizationForm)
-  const [saving, setSaving] = useState(false)
-  const [formError, setFormError] = useState('')
   const [detail, setDetail] = useState<Organization | null>(null)
   const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null)
   const [authForm, setAuthForm] = useState<AuthForm>({ organizationName: '', displayName: '', email: '', password: '' })
@@ -39,13 +24,11 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const detailId = pathname === '/organizations/new' ? null : /^\/organizations\/([^/]+)$/.exec(pathname)?.[1] ?? null
-  const isCreatePage = pathname === '/organizations/new'
   const isOrganizationsPage = pathname === '/organizations'
 
   function navigate(path: string) {
     window.history.pushState({}, '', path)
     setPathname(path)
-    setFormError('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -57,8 +40,7 @@ function App() {
 
   useEffect(() => {
     let active = true
-    fetch('/api/auth/me')
-      .then(async response => response.ok ? await response.json() as AuthUser : null)
+    authService.me()
       .then(user => { if (active) setAuthUser(user) })
       .catch(() => { if (active) setAuthUser(null) })
       .finally(() => { if (active) setAuthReady(true) })
@@ -67,21 +49,19 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return
-    if (authUser && pathname === '/') navigate('/organizations')
-    else if (!authUser && pathname !== '/' && pathname !== '/login' && pathname !== '/register') navigate('/login')
-    else if (authUser && (pathname === '/login' || pathname === '/register')) navigate('/organizations')
-    else if (authUser && pathname === '/organizations/new') navigate('/organizations')
+    if (authUser && pathname === '/') window.location.replace('/organizations')
+    else if (!authUser && pathname !== '/' && pathname !== '/login' && pathname !== '/register') window.location.replace('/login')
+    else if (authUser && (pathname === '/login' || pathname === '/register')) window.location.replace('/organizations')
+    else if (authUser && pathname === '/organizations/new') window.location.replace('/organizations')
   }, [authReady, authUser, pathname])
 
   async function loadOrganizations() {
     setListLoading(true)
     try {
-      const response = await fetch('/api/organizations')
-      if (!response.ok) throw new Error('Impossible de charger les organisations.')
-      setOrganizations(await response.json() as Organization[])
+      setOrganizations(await organizationService.list())
       setListError('')
     } catch (cause) {
-      setListError(cause instanceof Error ? cause.message : 'Le serveur est indisponible.')
+      setListError(getApiErrorMessage(cause, 'Impossible de charger les organisations.'))
     } finally {
       setListLoading(false)
     }
@@ -90,17 +70,13 @@ function App() {
   useEffect(() => {
     if (!authUser || !isOrganizationsPage) return
     const controller = new AbortController()
-    fetch('/api/organizations', { signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) throw new Error('Impossible de charger les organisations.')
-        return await response.json() as Organization[]
-      })
+    organizationService.list({ signal: controller.signal })
       .then(data => {
         setOrganizations(data)
         setListError('')
       })
       .catch(cause => {
-        if (!controller.signal.aborted) setListError(cause instanceof Error ? cause.message : 'Le serveur est indisponible.')
+        if (!controller.signal.aborted) setListError(getApiErrorMessage(cause, 'Impossible de charger les organisations.'))
       })
       .finally(() => {
         if (!controller.signal.aborted) setListLoading(false)
@@ -112,57 +88,16 @@ function App() {
     if (!detailId || !authUser) return
 
     const controller = new AbortController()
-    fetch(`/api/organizations/${encodeURIComponent(detailId)}`, { signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) {
-          if (response.status === 404) throw new Error('Cette organisation est introuvable.')
-          throw new Error('Impossible de charger les détails de l’organisation.')
-        }
-        return await response.json() as Organization
-      })
+    organizationService.get(detailId, { signal: controller.signal })
       .then(setDetail)
       .catch(cause => {
         if (!controller.signal.aborted) setDetailError({
           id: detailId,
-          message: cause instanceof Error ? cause.message : 'Une erreur est survenue.',
+          message: getApiErrorMessage(cause, 'Impossible de charger cette organisation.'),
         })
       })
     return () => controller.abort()
   }, [detailId, authUser])
-
-  async function createOrganization(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const name = organizationForm.name.trim()
-    if (!name) return
-
-    setSaving(true)
-    setFormError('')
-    try {
-      const response = await fetch('/api/organizations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: organizationForm.description.trim() || null,
-          website: organizationForm.website.trim() || null,
-          contactEmail: organizationForm.contactEmail.trim() || null,
-          phone: organizationForm.phone.trim() || null,
-        }),
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as ApiError
-        throw new Error(body.detail ?? body.message ?? 'Impossible de créer cette organisation.')
-      }
-      const created = await response.json() as Organization
-      setOrganizationForm(emptyOrganizationForm)
-      await loadOrganizations()
-      navigate(`/organizations/${created.id}`)
-    } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : 'Impossible de créer cette organisation.')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -170,18 +105,11 @@ function App() {
     setAuthSaving(true)
     setAuthError('')
     try {
-      const response = await fetch(`/api/auth/${registering ? 'register' : 'login'}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registering ? authForm : { email: authForm.email, password: authForm.password }),
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as ApiError
-        throw new Error(body.detail ?? body.message ?? 'Impossible de vous connecter.')
-      }
-      setAuthUser(await response.json() as AuthUser)
+      const user = registering ? await authService.register(authForm) : await authService.login({ email: authForm.email, password: authForm.password })
+      setAuthUser(user)
       navigate('/organizations')
     } catch (cause) {
-      setAuthError(cause instanceof Error ? cause.message : 'Impossible de vous connecter.')
+      setAuthError(getApiErrorMessage(cause, 'Impossible de vous connecter.'))
     } finally { setAuthSaving(false) }
   }
 
@@ -195,10 +123,10 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const pageTitle = isCreatePage ? 'Nouvelle organisation' : detailId ? 'Détail de l’organisation' : 'Organisations'
+  const pageTitle = detailId ? 'Fiche organisation' : 'Organisations'
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
+    await authService.logout().catch(() => undefined)
     setAuthUser(null)
     setOrganizations([])
     navigate('/')
@@ -242,24 +170,7 @@ function App() {
               <div className="list-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher une organisation" aria-label="Rechercher une organisation" /></label><button className="secondary-button" onClick={() => void loadOrganizations()}>↻ Actualiser</button></div>
               {listLoading ? <div className="empty-state">Chargement des organisations…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Aucune organisation pour le moment</strong><p>Créez votre première organisation pour commencer.</p><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ Créer une organisation</button></div> : filteredOrganizations.length === 0 ? <div className="empty-state"><strong>Aucun résultat</strong><p>Essayez un autre nom d’organisation.</p></div> : <div className="org-list">{filteredOrganizations.map(organization => <button className="org-row" key={organization.id} onClick={() => navigate(`/organizations/${organization.id}`)}><div className="org-mark">{organization.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{organization.name}</strong><small>Créée le {new Date(organization.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="org-metric"><strong>{organization.spaces}</strong><small>Espaces</small></div><div className="org-metric"><strong>{organization.projects}</strong><small>Projets</small></div><div className="org-metric"><strong>{organization.tasks}</strong><small>Tâches</small></div><span className="row-arrow">›</span></button>)}</div>}
             </section>
-          </>}
-
-          {isCreatePage && <>
-            <button className="back-link" onClick={() => navigate('/organizations')}>← Retour aux organisations</button>
-            <div className="page-heading compact-heading"><div><p className="eyebrow">ESPACE DE TRAVAIL</p><h1>Créer une organisation</h1><p className="subtitle">Une organisation regroupe ses espaces, projets et équipes.</p></div></div>
-            <section className="form-panel"><div className="form-panel-heading"><div className="form-icon">◫</div><div><h2>Informations générales</h2><p>Renseignez le nom de votre nouvelle organisation.</p></div></div>
-              <form className="organization-form" onSubmit={createOrganization}>
-                <div className="form-grid">
-                  <div className="form-field full-width"><label htmlFor="organization-name">Nom de l’organisation <span>*</span></label><input id="organization-name" value={organizationForm.name} onChange={event => setOrganizationForm({ ...organizationForm, name: event.target.value })} placeholder="Ex. Acme Studio" maxLength={50} autoFocus required /><small className="field-hint">50 caractères maximum.</small></div>
-                  <div className="form-field full-width"><label htmlFor="organization-description">Description</label><textarea id="organization-description" value={organizationForm.description} onChange={event => setOrganizationForm({ ...organizationForm, description: event.target.value })} placeholder="Présentez brièvement votre organisation" maxLength={500} rows={4} /><small className="field-hint">Facultatif · 500 caractères maximum.</small></div>
-                  <div className="form-field"><label htmlFor="organization-website">Site web</label><input id="organization-website" type="url" value={organizationForm.website} onChange={event => setOrganizationForm({ ...organizationForm, website: event.target.value })} placeholder="https://exemple.com" maxLength={255} /></div>
-                  <div className="form-field"><label htmlFor="organization-email">E-mail de contact</label><input id="organization-email" type="email" value={organizationForm.contactEmail} onChange={event => setOrganizationForm({ ...organizationForm, contactEmail: event.target.value })} placeholder="contact@exemple.com" maxLength={254} /></div>
-                  <div className="form-field"><label htmlFor="organization-phone">Téléphone</label><input id="organization-phone" type="tel" value={organizationForm.phone} onChange={event => setOrganizationForm({ ...organizationForm, phone: event.target.value })} placeholder="+212 600 000 000" maxLength={30} /></div>
-                </div>
-                {formError && <div className="alert form-alert" role="alert">{formError}</div>}
-                <div className="form-actions"><button type="button" className="secondary-button" onClick={() => navigate('/organizations')}>Annuler</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Création en cours…' : 'Créer l’organisation'}</button></div>
-              </form>
-            </section>
+            <WorkspaceCrud onChange={() => { void loadOrganizations() }} />
           </>}
 
           {detailId && <>
