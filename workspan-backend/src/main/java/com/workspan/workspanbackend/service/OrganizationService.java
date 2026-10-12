@@ -1,7 +1,6 @@
 package com.workspan.workspanbackend.service;
 
 import com.workspan.workspanbackend.entity.Organization;
-import com.workspan.workspanbackend.dto.OrganizationRequest;
 import com.workspan.workspanbackend.dto.OrganizationResponse;
 import com.workspan.workspanbackend.mapper.OrganizationMapper;
 import com.workspan.workspanbackend.repository.*;
@@ -34,32 +33,19 @@ public class OrganizationService {
         this.mapper = mapper;
     }
 
-    public List<OrganizationResponse> findAll() {
-        return organizations.findAll().stream().map(this::response).toList();
-    }
-
     public List<OrganizationResponse> findForOrganization(UUID organizationId) {
         Organization organization = organizations.findById(organizationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found"));
         return List.of(response(organization));
     }
 
-    public OrganizationResponse findById(UUID id) {
+    private OrganizationResponse findById(UUID id) {
         return response(organizations.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found")));
     }
 
     public OrganizationResponse findById(UUID id, UUID organizationId) {
         if (!id.equals(organizationId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found");
         return findById(id);
-    }
-
-    @Transactional
-    public OrganizationResponse create(OrganizationRequest request) {
-        String name = request.name().trim();
-        if (organizations.existsByNameIgnoreCase(name))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "An organization with this name already exists");
-        OrganizationRequest normalized = new OrganizationRequest(name, request.description(), request.website(), request.contactEmail(), request.phone());
-        return response(organizations.save(mapper.toEntity(normalized)));
     }
 
     private OrganizationResponse response(Organization organization) {

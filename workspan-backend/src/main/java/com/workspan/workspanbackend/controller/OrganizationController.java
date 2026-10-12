@@ -1,11 +1,11 @@
 package com.workspan.workspanbackend.controller;
 
 import com.workspan.workspanbackend.dto.OrganizationResponse;
-import com.workspan.workspanbackend.service.AuthService;
 import com.workspan.workspanbackend.service.OrganizationService;
-import com.workspan.workspanbackend.dto.AuthResponse;
+import com.workspan.workspanbackend.service.WorkspaceAccess;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpSession;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -13,30 +13,24 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/organizations")
+@Tag(name = "Organizations", description = "Organisation associée à la session")
+@SecurityRequirement(name = "sessionCookie")
 public class OrganizationController {
     private final OrganizationService service;
-    private final AuthService auth;
+    private final WorkspaceAccess access;
 
-    public OrganizationController(OrganizationService service, AuthService auth) {
+    public OrganizationController(OrganizationService service, WorkspaceAccess access) {
         this.service = service;
-        this.auth = auth;
+        this.access = access;
     }
 
     @GetMapping
     public List<OrganizationResponse> findAll(HttpSession session) {
-        AuthResponse user = currentUser(session);
-        return service.findForOrganization(user.organizationId());
+        return service.findForOrganization(access.organizationId(session));
     }
 
     @GetMapping("/{id}")
     public OrganizationResponse findById(@PathVariable UUID id, HttpSession session) {
-        AuthResponse user = currentUser(session);
-        return service.findById(id, user.organizationId());
-    }
-
-    private AuthResponse currentUser(HttpSession session) {
-        Object id = session.getAttribute("authenticatedUserId");
-        if (!(id instanceof UUID userId)) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
-        return auth.currentUser(userId);
+        return service.findById(id, access.organizationId(session));
     }
 }
