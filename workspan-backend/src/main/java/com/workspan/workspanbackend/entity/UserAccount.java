@@ -7,7 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
 
 @Entity
-@Table(name = "users", uniqueConstraints = @UniqueConstraint(columnNames = {"organization_id", "email"}))
+@Table(name = "users", uniqueConstraints = @UniqueConstraint(columnNames = "email"))
 public class UserAccount extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "organization_id", nullable = false)
@@ -16,6 +16,9 @@ public class UserAccount extends BaseEntity {
     @NotBlank
     @Column(nullable = false, length = 254)
     private String email;
+    @NotBlank
+    @Column(name = "display_name", nullable = false, length = 100)
+    private String displayName;
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
     @Column(nullable = false, length = 24)
@@ -41,6 +44,10 @@ public class UserAccount extends BaseEntity {
     public void setEmail(String v) {
         email = v;
     }
+
+    public String getDisplayName() { return displayName; }
+
+    public void setDisplayName(String v) { displayName = v; }
 
     public String getPasswordHash() {
         return passwordHash;
