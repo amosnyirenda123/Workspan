@@ -3,7 +3,7 @@ import { authService } from './api/authService'
 import { getApiErrorMessage } from './api/http'
 import { organizationService } from './api/organizationService'
 import type { AuthUser, Organization } from './api/types'
-import { WorkspaceCrud } from './WorkspaceCrud'
+import { WorkspaceCrud } from './features/workspace/WorkspaceCrud'
 import './App.css'
 
 type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
