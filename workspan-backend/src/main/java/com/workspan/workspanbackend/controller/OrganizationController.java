@@ -1,9 +1,10 @@
 package com.workspan.workspanbackend.controller;
 
-import com.workspan.workspanbackend.dto.OrganizationRequest;
 import com.workspan.workspanbackend.dto.OrganizationResponse;
+import com.workspan.workspanbackend.service.AuthService;
 import com.workspan.workspanbackend.service.OrganizationService;
-import jakarta.validation.Valid;
+import com.workspan.workspanbackend.dto.AuthResponse;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,24 +15,28 @@ import java.util.UUID;
 @RequestMapping("/api/organizations")
 public class OrganizationController {
     private final OrganizationService service;
+    private final AuthService auth;
 
-    public OrganizationController(OrganizationService service) {
+    public OrganizationController(OrganizationService service, AuthService auth) {
         this.service = service;
+        this.auth = auth;
     }
 
     @GetMapping
-    public List<OrganizationResponse> findAll() {
-        return service.findAll();
+    public List<OrganizationResponse> findAll(HttpSession session) {
+        AuthResponse user = currentUser(session);
+        return service.findForOrganization(user.organizationId());
     }
 
     @GetMapping("/{id}")
-    public OrganizationResponse findById(@PathVariable UUID id) {
-        return service.findById(id);
+    public OrganizationResponse findById(@PathVariable UUID id, HttpSession session) {
+        AuthResponse user = currentUser(session);
+        return service.findById(id, user.organizationId());
     }
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public OrganizationResponse create(@Valid @RequestBody OrganizationRequest request) {
-        return service.create(request);
+    private AuthResponse currentUser(HttpSession session) {
+        Object id = session.getAttribute("authenticatedUserId");
+        if (!(id instanceof UUID userId)) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        return auth.currentUser(userId);
     }
 }

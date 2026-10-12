@@ -16,6 +16,8 @@ type Organization = {
 
 type ApiError = { detail?: string; message?: string }
 type OrganizationForm = { name: string; description: string; website: string; contactEmail: string; phone: string }
+type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
+type AuthUser = { userId: string; displayName: string; email: string; organizationId: string; organizationName: string }
 
 const emptyOrganizationForm: OrganizationForm = { name: '', description: '', website: '', contactEmail: '', phone: '' }
 
@@ -30,10 +32,15 @@ function App() {
   const [formError, setFormError] = useState('')
   const [detail, setDetail] = useState<Organization | null>(null)
   const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null)
+  const [authForm, setAuthForm] = useState<AuthForm>({ organizationName: '', displayName: '', email: '', password: '' })
+  const [authError, setAuthError] = useState('')
+  const [authSaving, setAuthSaving] = useState(false)
+  const [authReady, setAuthReady] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const detailId = pathname === '/organizations/new' ? null : /^\/organizations\/([^/]+)$/.exec(pathname)?.[1] ?? null
   const isCreatePage = pathname === '/organizations/new'
-  const isOrganizationsPage = pathname === '/' || pathname === '/organizations'
+  const isOrganizationsPage = pathname === '/organizations'
 
   function navigate(path: string) {
     window.history.pushState({}, '', path)
@@ -47,6 +54,24 @@ function App() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/auth/me')
+      .then(async response => response.ok ? await response.json() as AuthUser : null)
+      .then(user => { if (active) setAuthUser(user) })
+      .catch(() => { if (active) setAuthUser(null) })
+      .finally(() => { if (active) setAuthReady(true) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!authReady) return
+    if (authUser && pathname === '/') navigate('/organizations')
+    else if (!authUser && pathname !== '/' && pathname !== '/login' && pathname !== '/register') navigate('/login')
+    else if (authUser && (pathname === '/login' || pathname === '/register')) navigate('/organizations')
+    else if (authUser && pathname === '/organizations/new') navigate('/organizations')
+  }, [authReady, authUser, pathname])
 
   async function loadOrganizations() {
     setListLoading(true)
@@ -63,6 +88,7 @@ function App() {
   }
 
   useEffect(() => {
+    if (!authUser || !isOrganizationsPage) return
     const controller = new AbortController()
     fetch('/api/organizations', { signal: controller.signal })
       .then(async response => {
@@ -80,10 +106,10 @@ function App() {
         if (!controller.signal.aborted) setListLoading(false)
       })
     return () => controller.abort()
-  }, [])
+  }, [authUser, isOrganizationsPage])
 
   useEffect(() => {
-    if (!detailId) return
+    if (!detailId || !authUser) return
 
     const controller = new AbortController()
     fetch(`/api/organizations/${encodeURIComponent(detailId)}`, { signal: controller.signal })
@@ -102,7 +128,7 @@ function App() {
         })
       })
     return () => controller.abort()
-  }, [detailId])
+  }, [detailId, authUser])
 
   async function createOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -138,6 +164,27 @@ function App() {
     }
   }
 
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const registering = pathname === '/register'
+    setAuthSaving(true)
+    setAuthError('')
+    try {
+      const response = await fetch(`/api/auth/${registering ? 'register' : 'login'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registering ? authForm : { email: authForm.email, password: authForm.password }),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as ApiError
+        throw new Error(body.detail ?? body.message ?? 'Impossible de vous connecter.')
+      }
+      setAuthUser(await response.json() as AuthUser)
+      navigate('/organizations')
+    } catch (cause) {
+      setAuthError(cause instanceof Error ? cause.message : 'Impossible de vous connecter.')
+    } finally { setAuthSaving(false) }
+  }
+
   const totals = useMemo(() => organizations.reduce((sum, organization) => ({
     spaces: sum.spaces + organization.spaces,
     projects: sum.projects + organization.projects,
@@ -150,6 +197,22 @@ function App() {
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
   const pageTitle = isCreatePage ? 'Nouvelle organisation' : detailId ? 'Détail de l’organisation' : 'Organisations'
 
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
+    setAuthUser(null)
+    setOrganizations([])
+    navigate('/')
+  }
+
+  if (!authReady || (authUser === null && pathname.startsWith('/organizations'))) return <main className="app-shell"><section className="main-panel" style={{ margin: '12vh auto', maxWidth: 560 }}><div className="content">Chargement de votre espace…</div></section></main>
+
+  if (pathname === '/' && !authUser) return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 960, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => event.preventDefault()}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading" style={{ marginTop: 72 }}><div><p className="eyebrow">PLANIFIEZ ENSEMBLE</p><h1>Tout votre travail, au même endroit.</h1><p className="subtitle">Créez votre espace Workspan, rassemblez vos équipes et suivez projets et tâches depuis une seule organisation.</p></div></div><div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary-button" onClick={() => navigate('/register')}>Créer un compte</button><button className="secondary-button" onClick={() => navigate('/login')}>Se connecter</button></div></div></section></main>
+
+  if (pathname === '/register' || pathname === '/login') {
+    const registering = pathname === '/register'
+    return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 560, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading"><div><p className="eyebrow">ESPACE DE TRAVAIL</p><h1>{registering ? 'Créez votre espace' : 'Connexion'}</h1><p className="subtitle">{registering ? 'Votre organisation et votre compte administrateur seront créés ensemble.' : 'Connectez-vous à votre espace Workspan.'}</p></div></div><section className="form-panel"><form className="organization-form" onSubmit={submitAuth}><div className="form-grid">{registering && <><div className="form-field full-width"><label htmlFor="auth-org">Nom de l’organisation <span>*</span></label><input id="auth-org" required maxLength={50} value={authForm.organizationName} onChange={event => setAuthForm({ ...authForm, organizationName: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-name">Votre nom <span>*</span></label><input id="auth-name" required maxLength={100} value={authForm.displayName} onChange={event => setAuthForm({ ...authForm, displayName: event.target.value })} /></div></>}<div className="form-field full-width"><label htmlFor="auth-email">E-mail <span>*</span></label><input id="auth-email" type="email" required maxLength={254} autoComplete="email" value={authForm.email} onChange={event => setAuthForm({ ...authForm, email: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-password">Mot de passe <span>*</span></label><input id="auth-password" type="password" required minLength={10} autoComplete={registering ? 'new-password' : 'current-password'} value={authForm.password} onChange={event => setAuthForm({ ...authForm, password: event.target.value })} /><small className="field-hint">10 caractères minimum.</small></div></div>{authError && <div className="alert form-alert" role="alert">{authError}</div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={authSaving}>{authSaving ? 'Patientez…' : registering ? 'Créer mon espace' : 'Se connecter'}</button><button type="button" className="text-button" onClick={() => navigate(registering ? '/login' : '/register')}>{registering ? 'Déjà inscrit ? Connexion' : 'Créer un compte'}</button></div></form></section></div></section></main>
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -160,10 +223,10 @@ function App() {
       </aside>
 
       <section className="main-panel">
-        <header className="topbar"><span>Workspan <b>/</b> {pageTitle}</span><span className="connection"><i /> API</span></header>
+        <header className="topbar"><span>Workspan <b>/</b> {pageTitle}</span><span className="connection">{authUser?.displayName} · <button className="text-button" onClick={() => void logout()}>Déconnexion</button></span></header>
         <div className="content">
           {isOrganizationsPage && <>
-            <div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour ! <span>✳</span></h1><p className="subtitle">Bienvenue dans votre espace de travail Workspan.</p></div><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ <span>Nouvelle organisation</span></button></div>
+            <div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour, {authUser?.displayName.split(' ')[0]} ! <span>✳</span></h1><p className="subtitle">Bienvenue dans l’espace de travail de {authUser?.organizationName}.</p></div></div>
 
             {listError && <div className="alert" role="alert">{listError} <button className="text-button" onClick={() => void loadOrganizations()}>Réessayer</button></div>}
 

@@ -38,8 +38,19 @@ public class OrganizationService {
         return organizations.findAll().stream().map(this::response).toList();
     }
 
+    public List<OrganizationResponse> findForOrganization(UUID organizationId) {
+        Organization organization = organizations.findById(organizationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found"));
+        return List.of(response(organization));
+    }
+
     public OrganizationResponse findById(UUID id) {
         return response(organizations.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found")));
+    }
+
+    public OrganizationResponse findById(UUID id, UUID organizationId) {
+        if (!id.equals(organizationId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found");
+        return findById(id);
     }
 
     @Transactional
