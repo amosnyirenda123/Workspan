@@ -10,6 +10,8 @@ Workspan runs a Spring Boot API, a React/TypeScript frontend, and MySQL.
 4. Open Swagger UI at <http://localhost:8080/swagger-ui.html>. The OpenAPI document is at <http://localhost:8080/v3/api-docs>.
 5. Open phpMyAdmin at <http://localhost:8081>. MySQL is published on port `3308` by default; change `MYSQL_PORT` in `.env` if that port is already in use.
 
+Employee credential emails require SMTP settings in `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM`). Copy the names and values from your SMTP provider. Without a configured SMTP host, the send actions report a delivery error.
+
 MySQL creates the `ilot` database on first startup and stores it in the `workspan_mysql_data` volume. Hibernate updates entity tables in this development setup. Do not use sample passwords outside local development.
 
 ## Run services without Docker

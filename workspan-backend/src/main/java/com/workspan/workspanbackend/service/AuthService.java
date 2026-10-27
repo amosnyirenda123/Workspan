@@ -3,6 +3,7 @@ package com.workspan.workspanbackend.service;
 import com.workspan.workspanbackend.dto.AuthResponse;
 import com.workspan.workspanbackend.dto.LoginRequest;
 import com.workspan.workspanbackend.dto.RegisterRequest;
+import com.workspan.workspanbackend.dto.PasswordChangeRequest;
 import com.workspan.workspanbackend.entity.*;
 import com.workspan.workspanbackend.repository.OrganizationRepository;
 import com.workspan.workspanbackend.repository.OrganizationRoleAssignmentRepository;
@@ -72,7 +73,23 @@ public class AuthService {
                 .map(this::response).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
     }
 
+    @Transactional
+    public AuthResponse changePassword(UUID id, PasswordChangeRequest request) {
+        UserAccount user = users.findById(id)
+                .filter(account -> account.getStatus().equals("ACTIVE"))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
+        if (!hasher.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+        }
+        if (request.currentPassword().equals(request.newPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a different password");
+        }
+        user.setPasswordHash(hasher.hash(request.newPassword()));
+        user.setMustChangePassword(false);
+        return response(user);
+    }
+
     private AuthResponse response(UserAccount user) {
-        return new AuthResponse(user.getId(), user.getDisplayName(), user.getEmail(), user.getOrganization().getId(), user.getOrganization().getName());
+        return new AuthResponse(user.getId(), user.getDisplayName(), user.getEmail(), user.getOrganization().getId(), user.getOrganization().getName(), user.isMustChangePassword());
     }
 }

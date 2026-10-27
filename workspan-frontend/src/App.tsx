@@ -4,6 +4,7 @@ import { getApiErrorMessage } from './api/http'
 import { organizationService } from './api/organizationService'
 import type { AuthUser, Organization } from './api/types'
 import { WorkspaceCrud } from './features/workspace/WorkspaceCrud'
+import { EmployeesManager } from './features/employees/EmployeesManager'
 import './App.css'
 
 type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
@@ -22,9 +23,13 @@ function App() {
   const [authSaving, setAuthSaving] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
 
   const detailId = pathname === '/organizations/new' ? null : /^\/organizations\/([^/]+)$/.exec(pathname)?.[1] ?? null
   const isOrganizationsPage = pathname === '/organizations'
+  const isEmployeesPage = pathname === '/employees'
 
   function navigate(path: string) {
     window.history.pushState({}, '', path)
@@ -49,6 +54,14 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return
+    if (authUser?.mustChangePassword) {
+      if (pathname !== '/change-password') window.location.replace('/change-password')
+      return
+    }
+    if (authUser && pathname === '/change-password') {
+      window.location.replace('/organizations')
+      return
+    }
     if (authUser && pathname === '/') window.location.replace('/organizations')
     else if (!authUser && pathname !== '/' && pathname !== '/login' && pathname !== '/register') window.location.replace('/login')
     else if (authUser && (pathname === '/login' || pathname === '/register')) window.location.replace('/organizations')
@@ -107,10 +120,30 @@ function App() {
     try {
       const user = registering ? await authService.register(authForm) : await authService.login({ email: authForm.email, password: authForm.password })
       setAuthUser(user)
-      navigate('/organizations')
+      navigate(user.mustChangePassword ? '/change-password' : '/organizations')
     } catch (cause) {
       setAuthError(getApiErrorMessage(cause, 'Impossible de vous connecter.'))
     } finally { setAuthSaving(false) }
+  }
+
+  async function submitPasswordChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPasswordError('')
+    if (passwordForm.next !== passwordForm.confirm) {
+      setPasswordError('Les nouveaux mots de passe ne correspondent pas.')
+      return
+    }
+    setPasswordSaving(true)
+    try {
+      const user = await authService.changePassword(passwordForm.current, passwordForm.next)
+      setAuthUser(user)
+      setPasswordForm({ current: '', next: '', confirm: '' })
+      navigate('/organizations')
+    } catch (cause) {
+      setPasswordError(getApiErrorMessage(cause, 'Impossible de modifier le mot de passe.'))
+    } finally {
+      setPasswordSaving(false)
+    }
   }
 
   const totals = useMemo(() => organizations.reduce((sum, organization) => ({
@@ -123,7 +156,7 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const pageTitle = detailId ? 'Fiche organisation' : 'Organisations'
+  const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : 'Organisations'
 
   async function logout() {
     await authService.logout().catch(() => undefined)
@@ -132,7 +165,7 @@ function App() {
     navigate('/')
   }
 
-  if (!authReady || (authUser === null && pathname.startsWith('/organizations'))) return <main className="app-shell"><section className="main-panel" style={{ margin: '12vh auto', maxWidth: 560 }}><div className="content">Chargement de votre espace…</div></section></main>
+  if (!authReady || (authUser === null && (pathname.startsWith('/organizations') || pathname === '/employees' || pathname === '/change-password'))) return <main className="app-shell"><section className="main-panel" style={{ margin: '12vh auto', maxWidth: 560 }}><div className="content">Chargement de votre espace…</div></section></main>
 
   if (pathname === '/' && !authUser) return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 960, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => event.preventDefault()}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading" style={{ marginTop: 72 }}><div><p className="eyebrow">PLANIFIEZ ENSEMBLE</p><h1>Tout votre travail, au même endroit.</h1><p className="subtitle">Créez votre espace Workspan, rassemblez vos équipes et suivez projets et tâches depuis une seule organisation.</p></div></div><div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary-button" onClick={() => navigate('/register')}>Créer un compte</button><button className="secondary-button" onClick={() => navigate('/login')}>Se connecter</button></div></div></section></main>
 
@@ -141,12 +174,17 @@ function App() {
     return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 560, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading"><div><p className="eyebrow">ESPACE DE TRAVAIL</p><h1>{registering ? 'Créez votre espace' : 'Connexion'}</h1><p className="subtitle">{registering ? 'Votre organisation et votre compte administrateur seront créés ensemble.' : 'Connectez-vous à votre espace Workspan.'}</p></div></div><section className="form-panel"><form className="organization-form" onSubmit={submitAuth}><div className="form-grid">{registering && <><div className="form-field full-width"><label htmlFor="auth-org">Nom de l’organisation <span>*</span></label><input id="auth-org" required maxLength={50} value={authForm.organizationName} onChange={event => setAuthForm({ ...authForm, organizationName: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-name">Votre nom <span>*</span></label><input id="auth-name" required maxLength={100} value={authForm.displayName} onChange={event => setAuthForm({ ...authForm, displayName: event.target.value })} /></div></>}<div className="form-field full-width"><label htmlFor="auth-email">E-mail <span>*</span></label><input id="auth-email" type="email" required maxLength={254} autoComplete="email" value={authForm.email} onChange={event => setAuthForm({ ...authForm, email: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-password">Mot de passe <span>*</span></label><input id="auth-password" type="password" required minLength={10} autoComplete={registering ? 'new-password' : 'current-password'} value={authForm.password} onChange={event => setAuthForm({ ...authForm, password: event.target.value })} /><small className="field-hint">10 caractères minimum.</small></div></div>{authError && <div className="alert form-alert" role="alert">{authError}</div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={authSaving}>{authSaving ? 'Patientez…' : registering ? 'Créer mon espace' : 'Se connecter'}</button><button type="button" className="text-button" onClick={() => navigate(registering ? '/login' : '/register')}>{registering ? 'Déjà inscrit ? Connexion' : 'Créer un compte'}</button></div></form></section></div></section></main>
   }
 
+  if (pathname === '/change-password' && authUser) {
+    return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 560, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => event.preventDefault()}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading"><div><p className="eyebrow">SECURITE DU COMPTE</p><h1>Choisissez un nouveau mot de passe</h1><p className="subtitle">Votre mot de passe temporaire ne peut servir qu'a la premiere connexion.</p></div></div><section className="form-panel"><form className="organization-form" onSubmit={event => void submitPasswordChange(event)}><div className="form-grid"><div className="form-field full-width"><label htmlFor="current-password">Mot de passe temporaire <span>*</span></label><input id="current-password" type="password" required autoComplete="current-password" value={passwordForm.current} onChange={event => setPasswordForm({ ...passwordForm, current: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="new-password">Nouveau mot de passe <span>*</span></label><input id="new-password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" value={passwordForm.next} onChange={event => setPasswordForm({ ...passwordForm, next: event.target.value })} /><small className="field-hint">12 caracteres minimum.</small></div><div className="form-field full-width"><label htmlFor="confirm-password">Confirmer le nouveau mot de passe <span>*</span></label><input id="confirm-password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" value={passwordForm.confirm} onChange={event => setPasswordForm({ ...passwordForm, confirm: event.target.value })} /></div></div>{passwordError && <div className="alert form-alert" role="alert">{passwordError}</div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={passwordSaving}>{passwordSaving ? 'Enregistrement...' : 'Modifier le mot de passe'}</button></div></form></section></div></section></main>
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a>
         <p className="nav-label">ESPACE DE TRAVAIL</p>
         <a className={`nav-item ${isOrganizationsPage ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); navigate('/organizations') }}><span>◫</span> Organisations</a>
+        <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>
         <div className="sidebar-bottom"><div className="avatar">W</div><div><strong>Workspan</strong><small>Gestion de projets</small></div></div>
       </aside>
 
@@ -171,6 +209,11 @@ function App() {
               {listLoading ? <div className="empty-state">Chargement des organisations…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Aucune organisation pour le moment</strong><p>Créez votre première organisation pour commencer.</p><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ Créer une organisation</button></div> : filteredOrganizations.length === 0 ? <div className="empty-state"><strong>Aucun résultat</strong><p>Essayez un autre nom d’organisation.</p></div> : <div className="org-list">{filteredOrganizations.map(organization => <button className="org-row" key={organization.id} onClick={() => navigate(`/organizations/${organization.id}`)}><div className="org-mark">{organization.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{organization.name}</strong><small>Créée le {new Date(organization.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="org-metric"><strong>{organization.spaces}</strong><small>Espaces</small></div><div className="org-metric"><strong>{organization.projects}</strong><small>Projets</small></div><div className="org-metric"><strong>{organization.tasks}</strong><small>Tâches</small></div><span className="row-arrow">›</span></button>)}</div>}
             </section>
             <WorkspaceCrud onChange={() => { void loadOrganizations() }} />
+          </>}
+
+          {isEmployeesPage && <>
+            <div className="page-heading"><div><p className="eyebrow">ADMINISTRATION DE L'ORGANISATION</p><h1>Employés</h1><p className="subtitle">Créez et consultez les membres de votre organisation.</p></div></div>
+            <EmployeesManager onChange={() => { void loadOrganizations() }} />
           </>}
 
           {detailId && <>

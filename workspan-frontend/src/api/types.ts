@@ -1,4 +1,4 @@
-export type AuthUser = { userId: string; displayName: string; email: string; organizationId: string; organizationName: string }
+export type AuthUser = { userId: string; displayName: string; email: string; organizationId: string; organizationName: string; mustChangePassword: boolean }
 
 export type Organization = {
   id: string
@@ -15,6 +15,14 @@ export type Organization = {
 
 export type Space = { id: string; organizationId: string; name: string; createdAt: string }
 export type SpaceRequest = { name: string }
+export type Employee = { id: string; spaceId: string; spaceName: string; name: string; email: string | null; jobTitle: string | null; status: string; hasAccount: boolean; credentialEmailSentAt: string | null; createdAt: string }
+export type EmployeeRequest = { spaceId: string; name: string; email: string; jobTitle?: string | null }
+export type EmployeeImportRow = EmployeeRequest & { rowNumber: number }
+export type EmployeeImportRequest = { employees: EmployeeImportRow[] }
+export type EmployeeImportRowResult = { rowNumber: number; status: 'CREATED' | 'SKIPPED'; message: string; employee: Employee | null }
+export type EmployeeImportResponse = { created: number; skipped: number; rows: EmployeeImportRowResult[] }
+export type CredentialDeliveryResult = { employeeId: string; email: string; status: 'SENT' | 'SKIPPED' | 'FAILED'; message: string; sentAt: string | null }
+export type CredentialBatchResponse = { sent: number; skipped: number; failed: number; results: CredentialDeliveryResult[] }
 
 export type Project = {
   id: string; spaceId: string; name: string; description: string | null

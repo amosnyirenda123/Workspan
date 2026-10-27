@@ -3,6 +3,7 @@ package com.workspan.workspanbackend.controller;
 import com.workspan.workspanbackend.dto.AuthResponse;
 import com.workspan.workspanbackend.dto.LoginRequest;
 import com.workspan.workspanbackend.dto.RegisterRequest;
+import com.workspan.workspanbackend.dto.PasswordChangeRequest;
 import com.workspan.workspanbackend.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -41,6 +42,13 @@ public class AuthController {
         Object id = session.getAttribute(USER_ID);
         if (!(id instanceof UUID userId)) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
         return auth.currentUser(userId);
+    }
+
+    @PostMapping("/change-password")
+    public AuthResponse changePassword(@Valid @RequestBody PasswordChangeRequest request, HttpSession session) {
+        Object id = session.getAttribute(USER_ID);
+        if (!(id instanceof UUID userId)) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        return auth.changePassword(userId, request);
     }
 
     @PostMapping("/logout")
