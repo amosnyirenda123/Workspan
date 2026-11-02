@@ -4,6 +4,9 @@ import { getApiErrorMessage } from '../../api/http'
 import { spaceService } from '../../api/spaceService'
 import type { CredentialBatchResponse, CredentialDeliveryResult, Employee, EmployeeImportRowResult, Space } from '../../api/types'
 import { downloadEmployeeTemplate, parseEmployeeFile, type EmployeeImportPreviewRow } from './employeeImport'
+import { accessService } from '../../api/accessService'
+import { canOrganization, canSpace } from '../../api/accessPermissions'
+import type { EffectiveAccess } from '../../api/types'
 
 type EmployeeForm = { spaceId: string; name: string; email: string; jobTitle: string }
 type ImportReportRow = { rowNumber: number; status: string; message: string }
@@ -26,15 +29,22 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
   const [credentialBusy, setCredentialBusy] = useState<string | null>(null)
   const [credentialSummary, setCredentialSummary] = useState('')
   const [credentialResults, setCredentialResults] = useState<CredentialDeliveryResult[]>([])
+  const [access, setAccess] = useState<EffectiveAccess | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
+    accessService.effective().then(setAccess).catch(() => setAccess(null))
     Promise.all([employeeService.list({ signal: controller.signal }), spaceService.list({ signal: controller.signal })])
       .then(([employeeData, spaceData]) => { setEmployees(employeeData); setSpaces(spaceData) })
       .catch(cause => { if (!controller.signal.aborted) setError(getApiErrorMessage(cause, 'Impossible de charger les employes et les espaces.')) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [])
+
+  const canCreateInSpace = (spaceId: string) => canSpace(access, spaceId, 'employee.create')
+  const canCreateAny = spaces.some(space => canCreateInSpace(space.id))
+  const canSendAll = canOrganization(access, 'employee.manage_accounts')
+  const canSeeDirectory = canOrganization(access, 'employee.view') || Object.values(access?.spacePermissions ?? {}).some(keys => keys.includes('employee.view') || keys.includes('employee.manage_accounts'))
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -173,13 +183,15 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
     }
   }
 
+  if (access && !canCreateAny && !canSeeDirectory) return <div className="empty-state">Aucun droit d’accès à la gestion des employés.</div>
+
   return <>
     <div className="crud-tabs employee-modes" role="tablist" aria-label="Mode de creation des employes">
-      <button role="tab" aria-selected={mode === 'single'} className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Ajouter un employe</button>
-      <button role="tab" aria-selected={mode === 'import'} className={mode === 'import' ? 'active' : ''} onClick={() => setMode('import')}>Importer CSV / Excel</button>
+      {canCreateAny && <button role="tab" aria-selected={mode === 'single'} className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Ajouter un employe</button>}
+      {canCreateAny && <button role="tab" aria-selected={mode === 'import'} className={mode === 'import' ? 'active' : ''} onClick={() => setMode('import')}>Importer CSV / Excel</button>}
     </div>
     <div className="crud-layout">
-      {mode === 'single' ? <section className="form-panel crud-form-panel">
+      {canCreateAny && (mode === 'single' ? <section className="form-panel crud-form-panel">
         <div className="form-panel-heading"><div className="form-icon">E</div><div><h2>Nouvel employe</h2><p>Ajoutez un membre a un espace de votre organisation.</p></div></div>
         <form className="organization-form" onSubmit={submit}>
           <div className="form-grid">
@@ -190,7 +202,7 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
           </div>
           {error && <div className="alert form-alert" role="alert">{error}</div>}
           {spaces.length === 0 && <p className="field-hint">Creez d'abord un espace pour y rattacher l'employe.</p>}
-          <div className="form-actions"><button className="primary-button" disabled={saving || spaces.length === 0}>{saving ? 'Creation...' : "Creer l'employe"}</button></div>
+          <div className="form-actions"><button className="primary-button" disabled={saving || !canCreateInSpace(form.spaceId)}>{saving ? 'Creation...' : "Creer l'employe"}</button></div>
         </form>
       </section> : <section className="form-panel crud-form-panel employee-import-panel">
         <div className="form-panel-heading"><div className="form-icon">⇧</div><div><h2>Importer des employes</h2><p>Chargez un fichier CSV ou Excel, jusqu'a 500 lignes.</p></div></div>
@@ -208,12 +220,12 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
         </>}
         {importSummary && <div className="import-summary" role="status">{importSummary}</div>}
         {importReport.length > 0 && <div className="employee-import-report" aria-live="polite">{importReport.map(row => <div key={`${row.rowNumber}-${row.status}`}><strong>Ligne {row.rowNumber} - {row.status}</strong><span>{row.message}</span></div>)}</div>}
-      </section>}
+      </section>)}
       <section className="crud-list-panel" aria-live="polite">
-        <div className="employee-list-heading"><div><strong>Employes de l'organisation</strong><small>Le premier envoi cree leur compte utilisateur.</small></div><button type="button" className="secondary-button" onClick={() => void sendAllCredentials()} disabled={!!credentialBusy || loading || !employees.length}>{credentialBusy === 'all' ? 'Envoi...' : 'Envoyer a tous'}</button></div>
+        <div className="employee-list-heading"><div><strong>Employes de l'organisation</strong><small>Le premier envoi cree leur compte utilisateur.</small></div><button type="button" className="secondary-button" onClick={() => void sendAllCredentials()} disabled={!canSendAll || !!credentialBusy || loading || !employees.length}>{credentialBusy === 'all' ? 'Envoi...' : 'Envoyer a tous'}</button></div>
         {credentialSummary && <div className="credential-summary" role="status">{credentialSummary}</div>}
         {credentialResults.some(row => row.status === 'FAILED') && <div className="credential-failures">{credentialResults.filter(row => row.status === 'FAILED').map(row => <p key={row.employeeId}>{row.email || 'E-mail manquant'}: {row.message}</p>)}</div>}
-        {loading ? <div className="empty-state">Chargement des employes...</div> : employees.length ? employees.map(employee => <article className="crud-row employee-row" key={employee.id}><div className="crud-symbol violet">{employee.name.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{employee.name}</strong><small>{employee.email ?? 'E-mail manquant'} - {employee.jobTitle ? `${employee.jobTitle} - ` : ''}{employee.spaceName}</small><small>{employee.credentialEmailSentAt ? `Identifiants envoyes le ${new Date(employee.credentialEmailSentAt).toLocaleDateString('fr-FR')}` : employee.hasAccount ? 'Compte cree, identifiants a envoyer' : 'Aucun compte utilisateur'}</small></div><button type="button" className="secondary-button employee-send-button" onClick={() => void sendEmployeeCredentials(employee)} disabled={!!credentialBusy}>{credentialBusy === employee.id ? 'Envoi...' : !employee.email ? 'Ajouter e-mail et envoyer' : employee.credentialEmailSentAt ? 'Reinitialiser et renvoyer' : 'Envoyer les identifiants'}</button></article>) : <div className="empty-state"><strong>Aucun employe</strong><p>Les employes crees apparaitront ici.</p></div>}
+        {loading ? <div className="empty-state">Chargement des employes...</div> : employees.length ? employees.map(employee => <article className="crud-row employee-row" key={employee.id}><div className="crud-symbol violet">{employee.name.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{employee.name}</strong><small>{employee.email ?? 'E-mail manquant'} - {employee.jobTitle ? `${employee.jobTitle} - ` : ''}{employee.spaceName}</small><small>{employee.credentialEmailSentAt ? `Identifiants envoyes le ${new Date(employee.credentialEmailSentAt).toLocaleDateString('fr-FR')}` : employee.hasAccount ? 'Compte cree, identifiants a envoyer' : 'Aucun compte utilisateur'}</small></div>{canSpace(access, employee.spaceId, 'employee.manage_accounts') && <button type="button" className="secondary-button employee-send-button" onClick={() => void sendEmployeeCredentials(employee)} disabled={!!credentialBusy}>{credentialBusy === employee.id ? 'Envoi...' : !employee.email ? 'Ajouter e-mail et envoyer' : employee.credentialEmailSentAt ? 'Reinitialiser et renvoyer' : 'Envoyer les identifiants'}</button>}</article>) : <div className="empty-state"><strong>Aucun employe</strong><p>Les employes crees apparaitront ici.</p></div>}
       </section>
     </div>
   </>

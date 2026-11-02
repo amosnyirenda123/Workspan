@@ -25,17 +25,20 @@ public class SpaceController {
     public SpaceController(SpaceService spaces, WorkspaceAccess access) { this.spaces = spaces; this.access = access; }
 
     @GetMapping @Operation(summary = "Lister les espaces")
-    public List<SpaceResponse> findAll(HttpSession session) { return spaces.findAll(access.organizationId(session)); }
+    public List<SpaceResponse> findAll(HttpSession session) {
+        UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
+        return spaces.findAll(organizationId).stream().filter(space -> access.canSeeSpace(userId, organizationId, space.id())).toList();
+    }
 
     @GetMapping("/{id}") @Operation(summary = "Lire un espace")
-    public SpaceResponse findById(@PathVariable UUID id, HttpSession session) { return spaces.findById(id, access.organizationId(session)); }
+    public SpaceResponse findById(@PathVariable UUID id, HttpSession session) { return spaces.findById(id, access.requireSpacePermission(session, id, "space.view")); }
 
     @PostMapping @ResponseStatus(HttpStatus.CREATED) @Operation(summary = "Créer un espace")
-    public SpaceResponse create(@Valid @RequestBody SpaceRequest request, HttpSession session) { return spaces.create(access.organizationId(session), request); }
+    public SpaceResponse create(@Valid @RequestBody SpaceRequest request, HttpSession session) { return spaces.create(access.requireOrganizationPermission(session, "space.create"), access.userId(session), request); }
 
     @PutMapping("/{id}") @Operation(summary = "Modifier un espace")
-    public SpaceResponse update(@PathVariable UUID id, @Valid @RequestBody SpaceRequest request, HttpSession session) { return spaces.update(id, access.organizationId(session), request); }
+    public SpaceResponse update(@PathVariable UUID id, @Valid @RequestBody SpaceRequest request, HttpSession session) { return spaces.update(id, access.requireSpacePermission(session, id, "space.edit"), request); }
 
     @DeleteMapping("/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) @Operation(summary = "Supprimer un espace")
-    public void delete(@PathVariable UUID id, HttpSession session) { spaces.delete(id, access.organizationId(session)); }
+    public void delete(@PathVariable UUID id, HttpSession session) { spaces.delete(id, access.requireSpacePermission(session, id, "space.delete")); }
 }

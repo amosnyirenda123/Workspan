@@ -11,4 +11,5 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     long countByProjectSpaceOrganizationId(UUID organizationId);
     List<Task> findAllByProjectSpaceOrganizationIdOrderByNameAsc(UUID organizationId);
     Optional<Task> findByIdAndProjectSpaceOrganizationId(UUID id, UUID organizationId);
+    List<Task> findAllByProjectIdOrderByNameAsc(UUID projectId);
 }

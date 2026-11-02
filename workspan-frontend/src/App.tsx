@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { authService } from './api/authService'
+import { accessService } from './api/accessService'
+import { canOrganization } from './api/accessPermissions'
 import { getApiErrorMessage } from './api/http'
 import { organizationService } from './api/organizationService'
-import type { AuthUser, Organization } from './api/types'
-import { WorkspaceCrud } from './features/workspace/WorkspaceCrud'
+import type { AuthUser, EffectiveAccess, Organization } from './api/types'
+import { WorkspaceCrud, type WorkspaceSection } from './features/workspace/WorkspaceCrud'
 import { EmployeesManager } from './features/employees/EmployeesManager'
 import './App.css'
 
@@ -20,9 +22,12 @@ function App() {
   const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null)
   const [authForm, setAuthForm] = useState<AuthForm>({ organizationName: '', displayName: '', email: '', password: '' })
   const [authError, setAuthError] = useState('')
+  const [authMode, setAuthMode] = useState<'organization' | 'employee'>('organization')
   const [authSaving, setAuthSaving] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccess | null>(null)
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('spaces')
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
   const [passwordError, setPasswordError] = useState('')
   const [passwordSaving, setPasswordSaving] = useState(false)
@@ -42,6 +47,33 @@ function App() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  useEffect(() => {
+    if (!authUser) { setEffectiveAccess(null); return }
+    let active = true
+    accessService.effective().then(data => { if (active) setEffectiveAccess(data) }).catch(() => { if (active) setEffectiveAccess(null) })
+    return () => { active = false }
+  }, [authUser])
+
+  const canViewOrganization = canOrganization(effectiveAccess, 'organization.view')
+  const canUseEmployeeSection = ['employee.view', 'employee.create', 'employee.manage_accounts'].some(key => canOrganization(effectiveAccess, key)
+    || Object.values(effectiveAccess?.spacePermissions ?? {}).some(permissions => permissions.includes(key)))
+  const hasWorkspacePermission = (keys: string[]) => keys.some(key => canOrganization(effectiveAccess, key)
+    || Object.values(effectiveAccess?.spacePermissions ?? {}).some(permissions => permissions.includes(key))
+    || Object.values(effectiveAccess?.projectPermissions ?? {}).some(permissions => permissions.includes(key)))
+  const canUseSpaces = hasWorkspacePermission(['space.view', 'space.create', 'space.edit', 'space.delete', 'project.create', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
+  const canUseProjects = hasWorkspacePermission(['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
+  const canUseTasks = hasWorkspacePermission(['task.view', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'])
+  const canUseResources = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage'])
+  const canUseAccessManagement = hasWorkspacePermission(['access.manage'])
+  const canUseAnalytics = hasWorkspacePermission(['analytics.view'])
+  const canViewAnalyticsEmployees = hasWorkspacePermission(['employee.view', 'employee.manage_accounts'])
+  const canViewAnalyticsPools = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage', 'project.resources.manage'])
+
+  function openWorkspaceSection(section: WorkspaceSection) {
+    setWorkspaceSection(section)
+    if (!isOrganizationsPage) navigate('/organizations')
+  }
 
   useEffect(() => {
     let active = true
@@ -69,6 +101,7 @@ function App() {
   }, [authReady, authUser, pathname])
 
   async function loadOrganizations() {
+    if (effectiveAccess && !canViewOrganization) return
     setListLoading(true)
     try {
       setOrganizations(await organizationService.list())
@@ -82,6 +115,8 @@ function App() {
 
   useEffect(() => {
     if (!authUser || !isOrganizationsPage) return
+    if (!effectiveAccess) return
+    if (!canViewOrganization) { setListLoading(false); setOrganizations([]); setListError(''); return }
     const controller = new AbortController()
     organizationService.list({ signal: controller.signal })
       .then(data => {
@@ -95,7 +130,7 @@ function App() {
         if (!controller.signal.aborted) setListLoading(false)
       })
     return () => controller.abort()
-  }, [authUser, isOrganizationsPage])
+  }, [authUser, effectiveAccess, isOrganizationsPage, canViewOrganization])
 
   useEffect(() => {
     if (!detailId || !authUser) return
@@ -156,7 +191,8 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : 'Organisations'
+  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
+  const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : isOrganizationsPage ? workspaceTitles[workspaceSection] : 'Organisations'
 
   async function logout() {
     await authService.logout().catch(() => undefined)
@@ -171,7 +207,7 @@ function App() {
 
   if (pathname === '/register' || pathname === '/login') {
     const registering = pathname === '/register'
-    return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 560, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading"><div><p className="eyebrow">ESPACE DE TRAVAIL</p><h1>{registering ? 'Créez votre espace' : 'Connexion'}</h1><p className="subtitle">{registering ? 'Votre organisation et votre compte administrateur seront créés ensemble.' : 'Connectez-vous à votre espace Workspan.'}</p></div></div><section className="form-panel"><form className="organization-form" onSubmit={submitAuth}><div className="form-grid">{registering && <><div className="form-field full-width"><label htmlFor="auth-org">Nom de l’organisation <span>*</span></label><input id="auth-org" required maxLength={50} value={authForm.organizationName} onChange={event => setAuthForm({ ...authForm, organizationName: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-name">Votre nom <span>*</span></label><input id="auth-name" required maxLength={100} value={authForm.displayName} onChange={event => setAuthForm({ ...authForm, displayName: event.target.value })} /></div></>}<div className="form-field full-width"><label htmlFor="auth-email">E-mail <span>*</span></label><input id="auth-email" type="email" required maxLength={254} autoComplete="email" value={authForm.email} onChange={event => setAuthForm({ ...authForm, email: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-password">Mot de passe <span>*</span></label><input id="auth-password" type="password" required minLength={10} autoComplete={registering ? 'new-password' : 'current-password'} value={authForm.password} onChange={event => setAuthForm({ ...authForm, password: event.target.value })} /><small className="field-hint">10 caractères minimum.</small></div></div>{authError && <div className="alert form-alert" role="alert">{authError}</div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={authSaving}>{authSaving ? 'Patientez…' : registering ? 'Créer mon espace' : 'Se connecter'}</button><button type="button" className="text-button" onClick={() => navigate(registering ? '/login' : '/register')}>{registering ? 'Déjà inscrit ? Connexion' : 'Créer un compte'}</button></div></form></section></div></section></main>
+    return <main className="app-shell"><section className="main-panel" style={{ maxWidth: 560, margin: '8vh auto', borderRadius: 18 }}><div className="content"><a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a><div className="page-heading compact-heading"><div><p className="eyebrow">ESPACE DE TRAVAIL</p><h1>{registering ? 'Créez votre espace' : 'Connexion'}</h1><p className="subtitle">{registering ? 'Votre organisation et votre compte administrateur seront créés ensemble.' : 'Connectez-vous à votre espace Workspan.'}</p></div></div>{!registering && <div className="auth-tabs" role="tablist" aria-label="Type de connexion"><button type="button" role="tab" aria-selected={authMode === 'organization'} className={authMode === 'organization' ? 'active' : ''} onClick={() => { setAuthMode('organization'); setAuthError('') }}>Organisation</button><button type="button" role="tab" aria-selected={authMode === 'employee'} className={authMode === 'employee' ? 'active' : ''} onClick={() => { setAuthMode('employee'); setAuthError('') }}>Employé</button></div>}<p className="auth-mode-hint">{!registering && authMode === 'employee' ? 'Utilisez les identifiants envoyés par votre organisation.' : ''}</p><section className="form-panel"><form className="organization-form" onSubmit={submitAuth}><div className="form-grid">{registering && <><div className="form-field full-width"><label htmlFor="auth-org">Nom de l’organisation <span>*</span></label><input id="auth-org" required maxLength={50} value={authForm.organizationName} onChange={event => setAuthForm({ ...authForm, organizationName: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-name">Votre nom <span>*</span></label><input id="auth-name" required maxLength={100} value={authForm.displayName} onChange={event => setAuthForm({ ...authForm, displayName: event.target.value })} /></div></>}<div className="form-field full-width"><label htmlFor="auth-email">E-mail <span>*</span></label><input id="auth-email" type="email" required maxLength={254} autoComplete="email" value={authForm.email} onChange={event => setAuthForm({ ...authForm, email: event.target.value })} /></div><div className="form-field full-width"><label htmlFor="auth-password">Mot de passe <span>*</span></label><input id="auth-password" type="password" required minLength={10} autoComplete={registering ? 'new-password' : 'current-password'} value={authForm.password} onChange={event => setAuthForm({ ...authForm, password: event.target.value })} /><small className="field-hint">10 caractères minimum.</small></div></div>{authError && <div className="alert form-alert" role="alert">{authError}</div>}<div className="form-actions"><button className="primary-button" type="submit" disabled={authSaving}>{authSaving ? 'Patientez…' : registering ? 'Créer mon espace' : 'Se connecter'}</button><button type="button" className="text-button" onClick={() => navigate(registering ? '/login' : '/register')}>{registering ? 'Déjà inscrit ? Connexion' : 'Créer un compte'}</button></div></form></section></div></section></main>
   }
 
   if (pathname === '/change-password' && authUser) {
@@ -183,16 +219,21 @@ function App() {
       <aside className="sidebar">
         <a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a>
         <p className="nav-label">ESPACE DE TRAVAIL</p>
-        <a className={`nav-item ${isOrganizationsPage ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); navigate('/organizations') }}><span>◫</span> Organisations</a>
-        <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>
+        {canUseSpaces && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'spaces' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('spaces') }}><span>▦</span> Espaces</a>}
+        {canUseProjects && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'projects' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('projects') }}><span>◈</span> Projets</a>}
+        {canUseTasks && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'tasks' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('tasks') }}><span>☑</span> Tâches</a>}
+        {canUseEmployeeSection && <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>}
+        {canUseResources && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'resources' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('resources') }}><span>⬡</span> Ressources</a>}
+        {canUseAccessManagement && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'access' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('access') }}><span>⚿</span> Rôles et permissions</a>}
+        {canUseAnalytics && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'analytics' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('analytics') }}><span>▥</span> Analyses</a>}
         <div className="sidebar-bottom"><div className="avatar">W</div><div><strong>Workspan</strong><small>Gestion de projets</small></div></div>
       </aside>
 
       <section className="main-panel">
-        <header className="topbar"><span>Workspan <b>/</b> {pageTitle}</span><span className="connection">{authUser?.displayName} · <button className="text-button" onClick={() => void logout()}>Déconnexion</button></span></header>
+        <header className="topbar"><span>Workspan <b>/</b> {pageTitle}</span><span className="connection">{authUser?.displayName} · <button type="button" className="logout-button" onClick={() => void logout()}>Déconnexion</button></span></header>
         <div className="content">
           {isOrganizationsPage && <>
-            <div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour, {authUser?.displayName.split(' ')[0]} ! <span>✳</span></h1><p className="subtitle">Bienvenue dans l’espace de travail de {authUser?.organizationName}.</p></div></div>
+            {canViewOrganization && <><div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour, {authUser?.displayName.split(' ')[0]} ! <span>✳</span></h1><p className="subtitle">Bienvenue dans l’espace de travail de {authUser?.organizationName}.</p></div></div>
 
             {listError && <div className="alert" role="alert">{listError} <button className="text-button" onClick={() => void loadOrganizations()}>Réessayer</button></div>}
 
@@ -207,8 +248,8 @@ function App() {
               <div className="section-heading"><div><h2>Vos organisations</h2><p>Consultez vos organisations et ouvrez leur fiche détaillée.</p></div><span className="count-pill">{organizations.length} au total</span></div>
               <div className="list-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher une organisation" aria-label="Rechercher une organisation" /></label><button className="secondary-button" onClick={() => void loadOrganizations()}>↻ Actualiser</button></div>
               {listLoading ? <div className="empty-state">Chargement des organisations…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Aucune organisation pour le moment</strong><p>Créez votre première organisation pour commencer.</p><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ Créer une organisation</button></div> : filteredOrganizations.length === 0 ? <div className="empty-state"><strong>Aucun résultat</strong><p>Essayez un autre nom d’organisation.</p></div> : <div className="org-list">{filteredOrganizations.map(organization => <button className="org-row" key={organization.id} onClick={() => navigate(`/organizations/${organization.id}`)}><div className="org-mark">{organization.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{organization.name}</strong><small>Créée le {new Date(organization.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="org-metric"><strong>{organization.spaces}</strong><small>Espaces</small></div><div className="org-metric"><strong>{organization.projects}</strong><small>Projets</small></div><div className="org-metric"><strong>{organization.tasks}</strong><small>Tâches</small></div><span className="row-arrow">›</span></button>)}</div>}
-            </section>
-            <WorkspaceCrud onChange={() => { void loadOrganizations() }} />
+            </section></>}
+            <WorkspaceCrud section={workspaceSection} onSectionChange={setWorkspaceSection} access={effectiveAccess} canViewAnalyticsEmployees={canViewAnalyticsEmployees} canViewAnalyticsPools={canViewAnalyticsPools} onChange={() => { void loadOrganizations() }} />
           </>}
 
           {isEmployeesPage && <>
