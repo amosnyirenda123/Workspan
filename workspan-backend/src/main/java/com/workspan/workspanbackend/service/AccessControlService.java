@@ -34,7 +34,7 @@ public class AccessControlService {
     }
 
     public List<PermissionResponse> permissionCatalog() {
-        return PermissionCatalog.DEFINITIONS.stream().map(def -> new PermissionResponse(def.key(), def.label(), def.description())).toList();
+        return PermissionCatalog.DEFINITIONS.stream().map(def -> new PermissionResponse(def.key(), def.label(), def.description(), def.category(), def.action())).toList();
     }
 
     public List<RoleResponse> roles(UUID organizationId, RoleScope scope, UUID contextId) {
@@ -189,7 +189,7 @@ public class AccessControlService {
         if (scope == RoleScope.ORGANIZATION) return true;
         if (scope == RoleScope.SPACE) return !key.equals("organization.view") && !key.equals("space.create");
         return Set.of("access.manage", "project.view", "project.edit", "project.delete", "project.resources.manage",
-                "task.view", "task.create", "task.edit", "task.delete").contains(key);
+                "task.view", "task.create", "task.edit", "task.delete", "analytics.view").contains(key);
     }
     private void rejectReserved(String name) { if (reserved(name)) throw badRequest("This role name is reserved for the platform"); }
     private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }

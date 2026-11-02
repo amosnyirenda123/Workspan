@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { accessService } from '../../api/accessService'
 import { getApiErrorMessage } from '../../api/http'
 import type { AccessManagementContext, AccessMember, AccessRole, PermissionDefinition, RoleAssignment, RoleScope } from '../../api/types'
+import './permission-picker.css'
 
 const isBuiltInRole = (name: string) => ['ADMIN', 'EMPLOYEE'].includes(name) || name.startsWith('SPACE_ADMIN - ') || name.startsWith('PROJECT_ADMIN - ')
 
@@ -15,6 +16,8 @@ export function AccessManager() {
   const [assignments, setAssignments] = useState<RoleAssignment[]>([])
   const [roleName, setRoleName] = useState('')
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
+  const [permissionActionFilter, setPermissionActionFilter] = useState('ALL')
+  const [permissionCategoryFilter, setPermissionCategoryFilter] = useState('ALL')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [memberId, setMemberId] = useState('')
   const [roleId, setRoleId] = useState('')
@@ -39,7 +42,17 @@ export function AccessManager() {
   const options = useMemo(() => scope === 'SPACE' ? context?.spaces ?? [] : scope === 'PROJECT' ? context?.projects ?? [] : [], [context, scope])
   const visiblePermissions = permissions.filter(permission => scope === 'ORGANIZATION'
     || (scope === 'SPACE' ? !['organization.view', 'space.create'].includes(permission.key)
-      : ['access.manage', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'].includes(permission.key)))
+      : ['access.manage', 'analytics.view', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'].includes(permission.key)))
+  const permissionActions = [...new Set(visiblePermissions.map(permission => permission.action))]
+  const permissionCategories = [...new Set(visiblePermissions.map(permission => permission.category))]
+  const filteredPermissions = visiblePermissions.filter(permission => (permissionActionFilter === 'ALL' || permission.action === permissionActionFilter)
+    && (permissionCategoryFilter === 'ALL' || permission.category === permissionCategoryFilter))
+  const permissionGroups = filteredPermissions.reduce((groups, permission) => {
+    const group = groups.find(item => item.category === permission.category)
+    if (group) group.permissions.push(permission)
+    else groups.push({ category: permission.category, permissions: [permission] })
+    return groups
+  }, [] as { category: string; permissions: PermissionDefinition[] }[])
 
   async function refresh() {
     if (!contextId) return
@@ -124,7 +137,10 @@ export function AccessManager() {
       <section className="form-panel crud-form-panel">
         <div className="form-panel-heading"><div className="form-icon">R</div><div><h2>{editingId ? 'Modifier le rôle' : 'Créer un rôle'}</h2><p>Choisissez les permissions utilisables à ce périmètre.</p></div></div>
         <form className="organization-form" onSubmit={saveRole}><div className="form-field"><label htmlFor="role-name">Nom du rôle <span>*</span></label><input id="role-name" required maxLength={60} value={roleName} onChange={event => setRoleName(event.target.value)} /></div>
-          <fieldset className="permission-picker"><legend>Permissions</legend>{visiblePermissions.map(permission => <label key={permission.key} className="permission-option"><input type="checkbox" checked={selectedPermissions.includes(permission.key)} onChange={event => setSelectedPermissions(current => event.target.checked ? [...current, permission.key] : current.filter(key => key !== permission.key))} /><span><strong>{permission.label}</strong><small>{permission.description}</small></span></label>)}</fieldset>
+          <fieldset className="permission-picker"><legend>Permissions · {selectedPermissions.length} sélectionnée(s)</legend>
+            <div className="permission-filters"><div className="form-field"><label htmlFor="permission-action-filter">Action</label><select id="permission-action-filter" value={permissionActionFilter} onChange={event => setPermissionActionFilter(event.target.value)}><option value="ALL">Toutes les actions</option>{permissionActions.map(action => <option key={action} value={action}>{action}</option>)}</select></div><div className="form-field"><label htmlFor="permission-category-filter">Fonctionnalité</label><select id="permission-category-filter" value={permissionCategoryFilter} onChange={event => setPermissionCategoryFilter(event.target.value)}><option value="ALL">Toutes les fonctionnalités</option>{permissionCategories.map(category => <option key={category} value={category}>{category}</option>)}</select></div></div>
+            {permissionGroups.length ? <div className="permission-groups">{permissionGroups.map(group => <section className="permission-group" key={group.category}><h3>{group.category}<span>{group.permissions.length}</span></h3>{group.permissions.map(permission => <label key={permission.key} className="permission-option"><input type="checkbox" checked={selectedPermissions.includes(permission.key)} onChange={event => setSelectedPermissions(current => event.target.checked ? [...current, permission.key] : current.filter(key => key !== permission.key))} /><span><strong>{permission.label}</strong><small>{permission.description}</small></span><small className="permission-action">{permission.action}</small></label>)}</section>)}</div> : <p className="field-hint">Aucune permission ne correspond à ces filtres.</p>}
+          </fieldset>
           <div className="form-actions"><button className="primary-button" disabled={saving || !contextId}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer le rôle' : 'Créer le rôle'}</button>{editingId && <button type="button" className="secondary-button" onClick={resetForm}>Annuler</button>}</div>
         </form>
       </section>

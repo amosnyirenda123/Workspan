@@ -60,7 +60,7 @@ public class TaskController {
     @GetMapping @Operation(summary = "Lister les tâches de l’organisation")
     public List<TaskResponse> findAll(HttpSession session) {
         UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
-        return tasks.findAll(organizationId).stream().filter(task -> java.util.List.of("task.view", "task.edit", "task.delete", "project.resources.manage")
+        return tasks.findAll(organizationId).stream().filter(task -> java.util.List.of("task.view", "task.edit", "task.delete", "project.resources.manage", "analytics.view")
                 .stream().anyMatch(key -> access.hasProjectPermissionById(userId, organizationId, task.projectId(), key))).toList();
     }
 

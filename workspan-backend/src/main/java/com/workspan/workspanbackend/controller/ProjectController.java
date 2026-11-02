@@ -27,7 +27,7 @@ public class ProjectController {
     @GetMapping @Operation(summary = "Lister les projets de l’organisation")
     public List<ProjectResponse> findAll(HttpSession session) {
         UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
-        return projects.findAll(organizationId).stream().filter(project -> java.util.List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage")
+        return projects.findAll(organizationId).stream().filter(project -> java.util.List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage", "analytics.view")
                 .stream().anyMatch(key -> access.hasProjectPermission(userId, organizationId, project.spaceId(), project.id(), key))).toList();
     }
 

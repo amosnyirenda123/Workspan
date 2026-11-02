@@ -91,6 +91,19 @@ public class WorkspaceAccess {
         return user.organizationId();
     }
 
+    public UUID requireResourcePoolRead(HttpSession session, UUID spaceId) {
+        AuthResponse user = current(session);
+        spaces.findByIdAndOrganizationId(spaceId, user.organizationId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+        boolean allowed = hasSpacePermission(user.userId(), user.organizationId(), spaceId, "resource.pool.view")
+                || hasSpacePermission(user.userId(), user.organizationId(), spaceId, "resource.pool.manage")
+                || hasSpacePermission(user.userId(), user.organizationId(), spaceId, "project.resources.manage")
+                || projects.findAllBySpaceIdOrderByNameAsc(spaceId).stream()
+                    .anyMatch(project -> hasProjectPermission(user.userId(), user.organizationId(), spaceId, project.getId(), "project.resources.manage"));
+        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permission required to view this resource pool");
+        return user.organizationId();
+    }
+
     public UUID requireProjectPermission(HttpSession session, UUID projectId, String permissionKey) {
         AuthResponse user = current(session);
         Project project = projects.findByIdAndSpaceOrganizationId(projectId, user.organizationId())
@@ -135,10 +148,10 @@ public class WorkspaceAccess {
     }
 
     public boolean canSeeSpace(UUID userId, UUID organizationId, UUID spaceId) {
-        return List.of("space.view", "space.edit", "space.delete", "project.create", "employee.view", "employee.create", "employee.manage_accounts", "resource.pool.manage")
+        return List.of("space.view", "space.edit", "space.delete", "project.create", "employee.view", "employee.create", "employee.manage_accounts", "resource.pool.view", "resource.pool.manage", "analytics.view")
                 .stream().anyMatch(key -> hasSpacePermission(userId, organizationId, spaceId, key))
                 || projects.findAllBySpaceIdOrderByNameAsc(spaceId).stream()
-                .anyMatch(project -> List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage")
+                .anyMatch(project -> List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage", "analytics.view")
                         .stream().anyMatch(key -> hasProjectPermission(userId, organizationId, spaceId, project.getId(), key)));
     }
 

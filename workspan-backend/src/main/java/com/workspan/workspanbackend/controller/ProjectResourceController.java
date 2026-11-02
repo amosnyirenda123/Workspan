@@ -25,7 +25,7 @@ public class ProjectResourceController {
     }
     @GetMapping("/resources")
     public List<ProjectResourceAllocationResponse> findAssigned(@PathVariable UUID projectId, HttpSession session) {
-        return resources.findAssigned(projectId, access.requireProjectAnyPermission(session, projectId, List.of("project.view", "project.resources.manage")));
+        return resources.findAssigned(projectId, access.requireProjectAnyPermission(session, projectId, List.of("project.view", "project.resources.manage", "analytics.view")));
     }
     @PostMapping("/resources") @ResponseStatus(HttpStatus.CREATED)
     public ProjectResourceAllocationResponse assign(@PathVariable UUID projectId,

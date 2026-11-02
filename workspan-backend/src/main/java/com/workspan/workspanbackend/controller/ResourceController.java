@@ -19,7 +19,7 @@ public class ResourceController {
     public ResourceController(ResourceService resources, WorkspaceAccess access) { this.resources = resources; this.access = access; }
 
     @GetMapping public List<ResourceResponse> findPool(@PathVariable UUID spaceId, HttpSession session) {
-        return resources.findSpacePool(spaceId, access.requireSpaceAnyPermission(session, spaceId, List.of("resource.pool.manage", "project.resources.manage")));
+        return resources.findSpacePool(spaceId, access.requireResourcePoolRead(session, spaceId));
     }
     @PostMapping @ResponseStatus(HttpStatus.CREATED)
     public ResourceResponse create(@PathVariable UUID spaceId, @Valid @RequestBody ResourceRequest request, HttpSession session) {

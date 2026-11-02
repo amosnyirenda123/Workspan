@@ -28,7 +28,7 @@ public class ScopedRoleProvisioner {
         String roleName = "SPACE_ADMIN - " + space.getId().toString().substring(0, 8);
         Role role = ensureRole(space.getOrganization(), roleName, RoleScope.SPACE, space, null,
                 List.of("space.view", "space.edit", "space.delete", "employee.view", "employee.create", "employee.manage_accounts",
-                        "resource.pool.manage", "project.view", "project.create", "project.edit", "project.delete",
+                        "resource.pool.view", "resource.pool.manage", "analytics.view", "project.view", "project.create", "project.edit", "project.delete",
                         "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage"));
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (spaceAssignments.findByUserIdAndRoleIdAndSpaceId(userId, role.getId(), space.getId()).isEmpty()) {
@@ -41,7 +41,7 @@ public class ScopedRoleProvisioner {
     public void assignProjectOwner(UUID organizationId, UUID userId, Project project) {
         String roleName = "PROJECT_ADMIN - " + project.getId().toString().substring(0, 8);
         Role role = ensureRole(project.getSpace().getOrganization(), roleName, RoleScope.PROJECT, null, project,
-                List.of("project.view", "project.edit", "project.delete", "project.resources.manage",
+                List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "analytics.view",
                         "task.view", "task.create", "task.edit", "task.delete", "access.manage"));
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (projectAssignments.findByUserIdAndRoleIdAndProjectId(userId, role.getId(), project.getId()).isEmpty()) {
@@ -59,9 +59,11 @@ public class ScopedRoleProvisioner {
             Role created = new Role(); created.setOrganization(organization);
             created.setName(name); created.setScope(scope); created.setScopeSpace(space); created.setScopeProject(project); return roles.save(created);
         });
-        if (rolePermissions.findAllByRoleId(role.getId()).isEmpty()) {
-            List<Permission> selected = permissions.findAllByKeyIn(keys);
-            for (Permission permission : selected) { RolePermission link = new RolePermission(); link.setRole(role); link.setPermission(permission); rolePermissions.save(link); }
+        java.util.Set<UUID> currentPermissionIds = rolePermissions.findAllByRoleId(role.getId()).stream()
+                .map(link -> link.getPermission().getId()).collect(java.util.stream.Collectors.toSet());
+        List<Permission> selected = permissions.findAllByKeyIn(keys);
+        for (Permission permission : selected) if (!currentPermissionIds.contains(permission.getId())) {
+            RolePermission link = new RolePermission(); link.setRole(role); link.setPermission(permission); rolePermissions.save(link);
         }
         return role;
     }

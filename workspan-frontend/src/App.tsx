@@ -64,8 +64,11 @@ function App() {
   const canUseSpaces = hasWorkspacePermission(['space.view', 'space.create', 'space.edit', 'space.delete', 'project.create', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
   const canUseProjects = hasWorkspacePermission(['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
   const canUseTasks = hasWorkspacePermission(['task.view', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'])
-  const canUseResources = hasWorkspacePermission(['resource.pool.manage'])
+  const canUseResources = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage'])
   const canUseAccessManagement = hasWorkspacePermission(['access.manage'])
+  const canUseAnalytics = hasWorkspacePermission(['analytics.view'])
+  const canViewAnalyticsEmployees = hasWorkspacePermission(['employee.view', 'employee.manage_accounts'])
+  const canViewAnalyticsPools = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage', 'project.resources.manage'])
 
   function openWorkspaceSection(section: WorkspaceSection) {
     setWorkspaceSection(section)
@@ -188,7 +191,7 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', resources: 'Pools de ressources', access: 'Rôles et permissions' }
+  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
   const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : isOrganizationsPage ? workspaceTitles[workspaceSection] : 'Organisations'
 
   async function logout() {
@@ -222,6 +225,7 @@ function App() {
         {canUseEmployeeSection && <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>}
         {canUseResources && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'resources' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('resources') }}><span>⬡</span> Ressources</a>}
         {canUseAccessManagement && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'access' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('access') }}><span>⚿</span> Rôles et permissions</a>}
+        {canUseAnalytics && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'analytics' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('analytics') }}><span>▥</span> Analyses</a>}
         <div className="sidebar-bottom"><div className="avatar">W</div><div><strong>Workspan</strong><small>Gestion de projets</small></div></div>
       </aside>
 
@@ -245,7 +249,7 @@ function App() {
               <div className="list-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher une organisation" aria-label="Rechercher une organisation" /></label><button className="secondary-button" onClick={() => void loadOrganizations()}>↻ Actualiser</button></div>
               {listLoading ? <div className="empty-state">Chargement des organisations…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Aucune organisation pour le moment</strong><p>Créez votre première organisation pour commencer.</p><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ Créer une organisation</button></div> : filteredOrganizations.length === 0 ? <div className="empty-state"><strong>Aucun résultat</strong><p>Essayez un autre nom d’organisation.</p></div> : <div className="org-list">{filteredOrganizations.map(organization => <button className="org-row" key={organization.id} onClick={() => navigate(`/organizations/${organization.id}`)}><div className="org-mark">{organization.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{organization.name}</strong><small>Créée le {new Date(organization.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="org-metric"><strong>{organization.spaces}</strong><small>Espaces</small></div><div className="org-metric"><strong>{organization.projects}</strong><small>Projets</small></div><div className="org-metric"><strong>{organization.tasks}</strong><small>Tâches</small></div><span className="row-arrow">›</span></button>)}</div>}
             </section></>}
-            <WorkspaceCrud section={workspaceSection} onSectionChange={setWorkspaceSection} onChange={() => { void loadOrganizations() }} />
+            <WorkspaceCrud section={workspaceSection} onSectionChange={setWorkspaceSection} access={effectiveAccess} canViewAnalyticsEmployees={canViewAnalyticsEmployees} canViewAnalyticsPools={canViewAnalyticsPools} onChange={() => { void loadOrganizations() }} />
           </>}
 
           {isEmployeesPage && <>
