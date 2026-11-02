@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { getApiErrorMessage } from '../../api/http'
 import { spaceService } from '../../api/spaceService'
 import type { Space, SpaceRequest } from '../../api/types'
+import type { EffectiveAccess } from '../../api/types'
+import { canOrganization, canSpace } from '../../api/accessPermissions'
 
 const emptyForm: SpaceRequest = { name: '' }
 
-export function SpacesManager({ onChange }: { onChange: () => void }) {
+export function SpacesManager({ onChange, access }: { onChange: () => void; access: EffectiveAccess | null }) {
   const [spaces, setSpaces] = useState<Space[]>([])
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -46,15 +48,15 @@ export function SpacesManager({ onChange }: { onChange: () => void }) {
   }
 
   return <div className="crud-layout">
-    <section className="form-panel crud-form-panel">
+    {(canOrganization(access, 'space.create') || !!editingId) && <section className="form-panel crud-form-panel">
       <div className="form-panel-heading"><div className="form-icon">E</div><div><h2>{editingId ? 'Modifier l’espace' : 'Nouvel espace'}</h2><p>Les espaces regroupent les projets de votre organisation.</p></div></div>
       <form className="organization-form" onSubmit={submit}><div className="form-field"><label htmlFor="space-name">Nom de l’espace <span>*</span></label><input id="space-name" required maxLength={50} value={name} onChange={event => setName(event.target.value)} /></div>
         {error && <div className="alert form-alert" role="alert">{error}</div>}
         <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer l’espace'}</button>{editingId && <button type="button" className="secondary-button" onClick={cancelEdit}>Annuler</button>}</div>
       </form>
-    </section>
+    </section>}
     <section className="crud-list-panel" aria-live="polite">
-      {loading ? <div className="empty-state">Chargement des espaces…</div> : spaces.length ? spaces.map(space => <article className="crud-row" key={space.id}><div className="crud-symbol violet">E</div><div className="crud-row-main"><strong>{space.name}</strong><small>Créé le {new Date(space.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="crud-actions"><button className="secondary-button" disabled={saving} onClick={() => edit(space)}>Modifier</button><button className="danger-button" disabled={saving} onClick={() => void remove(space)}>Supprimer</button></div></article>) : <div className="empty-state"><strong>Aucun espace</strong><p>Créez votre premier espace pour commencer.</p></div>}
+      {loading ? <div className="empty-state">Chargement des espaces…</div> : spaces.length ? spaces.map(space => <article className="crud-row" key={space.id}><div className="crud-symbol violet">E</div><div className="crud-row-main"><strong>{space.name}</strong><small>Créé le {new Date(space.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="crud-actions">{canSpace(access, space.id, 'space.edit') && <button className="secondary-button" disabled={saving} onClick={() => edit(space)}>Modifier</button>}{canSpace(access, space.id, 'space.delete') && <button className="danger-button" disabled={saving} onClick={() => void remove(space)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucun espace</strong><p>Créez votre premier espace pour commencer.</p></div>}
     </section>
   </div>
 }

@@ -15,6 +15,12 @@ public class Role extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private RoleScope scope;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "scope_space_id")
+    private Space scopeSpace;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "scope_project_id")
+    private Project scopeProject;
 
     public Role() {
     }
@@ -42,4 +48,9 @@ public class Role extends BaseEntity {
     public void setScope(RoleScope v) {
         scope = v;
     }
+
+    public Space getScopeSpace() { return scopeSpace; }
+    public void setScopeSpace(Space value) { scopeSpace = value; }
+    public Project getScopeProject() { return scopeProject; }
+    public void setScopeProject(Project value) { scopeProject = value; }
 }

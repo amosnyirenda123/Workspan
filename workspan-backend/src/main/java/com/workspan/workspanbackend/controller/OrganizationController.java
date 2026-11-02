@@ -26,11 +26,11 @@ public class OrganizationController {
 
     @GetMapping
     public List<OrganizationResponse> findAll(HttpSession session) {
-        return service.findForOrganization(access.organizationId(session));
+        return service.findForOrganization(access.requireOrganizationPermission(session, "organization.view"));
     }
 
     @GetMapping("/{id}")
     public OrganizationResponse findById(@PathVariable UUID id, HttpSession session) {
-        return service.findById(id, access.organizationId(session));
+        return service.findById(id, access.requireOrganizationPermission(session, "organization.view"));
     }
 }

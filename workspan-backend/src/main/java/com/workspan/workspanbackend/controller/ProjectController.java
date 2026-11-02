@@ -25,17 +25,26 @@ public class ProjectController {
     public ProjectController(ProjectService projects, WorkspaceAccess access) { this.projects = projects; this.access = access; }
 
     @GetMapping @Operation(summary = "Lister les projets de l’organisation")
-    public List<ProjectResponse> findAll(HttpSession session) { return projects.findAll(access.organizationId(session)); }
+    public List<ProjectResponse> findAll(HttpSession session) {
+        UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
+        return projects.findAll(organizationId).stream().filter(project -> java.util.List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage")
+                .stream().anyMatch(key -> access.hasProjectPermission(userId, organizationId, project.spaceId(), project.id(), key))).toList();
+    }
 
     @GetMapping("/{id}") @Operation(summary = "Lire un projet")
-    public ProjectResponse findById(@PathVariable UUID id, HttpSession session) { return projects.findById(id, access.organizationId(session)); }
+    public ProjectResponse findById(@PathVariable UUID id, HttpSession session) { return projects.findById(id, access.requireProjectAnyPermission(session, id, java.util.List.of("project.view", "project.edit", "project.delete"))); }
 
     @PostMapping @ResponseStatus(HttpStatus.CREATED) @Operation(summary = "Créer un projet")
-    public ProjectResponse create(@Valid @RequestBody ProjectRequest request, HttpSession session) { return projects.create(access.organizationId(session), request); }
+    public ProjectResponse create(@Valid @RequestBody ProjectRequest request, HttpSession session) { return projects.create(access.requireSpacePermission(session, request.spaceId(), "project.create"), access.userId(session), request); }
 
     @PutMapping("/{id}") @Operation(summary = "Modifier un projet")
-    public ProjectResponse update(@PathVariable UUID id, @Valid @RequestBody ProjectRequest request, HttpSession session) { return projects.update(id, access.organizationId(session), request); }
+    public ProjectResponse update(@PathVariable UUID id, @Valid @RequestBody ProjectRequest request, HttpSession session) {
+        UUID organizationId = access.requireProjectPermission(session, id, "project.edit");
+        ProjectResponse existing = projects.findById(id, organizationId);
+        if (!existing.spaceId().equals(request.spaceId())) access.requireSpacePermission(session, request.spaceId(), "project.create");
+        return projects.update(id, organizationId, request);
+    }
 
     @DeleteMapping("/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) @Operation(summary = "Supprimer un projet")
-    public void delete(@PathVariable UUID id, HttpSession session) { projects.delete(id, access.organizationId(session)); }
+    public void delete(@PathVariable UUID id, HttpSession session) { projects.delete(id, access.requireProjectPermission(session, id, "project.delete")); }
 }

@@ -19,9 +19,10 @@ import java.util.UUID;
 public class SpaceService {
     private final SpaceRepository spaces;
     private final OrganizationRepository organizations;
+    private final ScopedRoleProvisioner roleProvisioner;
 
-    public SpaceService(SpaceRepository spaces, OrganizationRepository organizations) {
-        this.spaces = spaces; this.organizations = organizations;
+    public SpaceService(SpaceRepository spaces, OrganizationRepository organizations, ScopedRoleProvisioner roleProvisioner) {
+        this.spaces = spaces; this.organizations = organizations; this.roleProvisioner = roleProvisioner;
     }
 
     public List<SpaceResponse> findAll(UUID organizationId) {
@@ -31,10 +32,12 @@ public class SpaceService {
     public SpaceResponse findById(UUID id, UUID organizationId) { return response(requireSpace(id, organizationId)); }
 
     @Transactional
-    public SpaceResponse create(UUID organizationId, SpaceRequest request) {
+    public SpaceResponse create(UUID organizationId, UUID creatorId, SpaceRequest request) {
         Organization organization = organizations.findById(organizationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found"));
-        return response(spaces.save(new Space(organization, request.name().trim())));
+        Space space = spaces.save(new Space(organization, request.name().trim()));
+        roleProvisioner.assignSpaceOwner(organizationId, creatorId, space);
+        return response(space);
     }
 
     @Transactional

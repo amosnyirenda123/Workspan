@@ -38,38 +38,50 @@ public class EmployeeController {
     @GetMapping
     @Operation(summary = "Lister les employés de l’organisation")
     public List<EmployeeResponse> findAll(HttpSession session) {
-        return employees.findAll(access.organizationId(session));
+        java.util.UUID userId = access.userId(session); java.util.UUID organizationId = access.organizationId(session);
+        return employees.findAll(organizationId).stream().filter(employee -> access.hasSpacePermission(userId, organizationId, employee.spaceId(), "employee.view")
+                || access.hasSpacePermission(userId, organizationId, employee.spaceId(), "employee.manage_accounts")).toList();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Créer un employé dans un espace de l’organisation")
     public EmployeeResponse create(@Valid @RequestBody EmployeeRequest request, HttpSession session) {
-        return employees.create(access.organizationId(session), request);
+        return employees.create(access.requireSpacePermission(session, request.spaceId(), "employee.create"), request);
     }
 
     @PostMapping("/import")
     @Operation(summary = "Importer jusqu'a 500 employes et ignorer les doublons")
     public EmployeeImportResponse importEmployees(@Valid @RequestBody EmployeeImportRequest request, HttpSession session) {
-        return employees.importEmployees(access.organizationId(session), request);
+        java.util.UUID organizationId = access.organizationId(session);
+        request.employees().forEach(row -> access.requireSpacePermission(session, row.spaceId(), "employee.create"));
+        return employees.importEmployees(organizationId, request);
     }
 
     @PatchMapping("/{employeeId}/email")
     @Operation(summary = "Ajouter ou corriger l'e-mail d'un employe sans compte")
     public EmployeeResponse updateEmail(@PathVariable java.util.UUID employeeId,
                                         @Valid @RequestBody EmployeeEmailRequest request, HttpSession session) {
-        return employees.updateEmail(access.organizationAdminId(session), employeeId, request);
+        java.util.UUID organizationId = access.organizationId(session);
+        EmployeeResponse employee = employees.findAll(organizationId).stream().filter(item -> item.id().equals(employeeId)).findFirst()
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+        access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
+        return employees.updateEmail(organizationId, employeeId, request);
     }
 
     @PostMapping("/credentials/send-all")
     @Operation(summary = "Send temporary credentials to employees not yet invited")
     public CredentialBatchResponse sendCredentialsToAll(HttpSession session) {
-        return credentials.sendAll(access.organizationAdminId(session));
+        return credentials.sendAll(access.requireOrganizationPermission(session, "employee.manage_accounts"));
     }
 
     @PostMapping("/{employeeId}/credentials/send")
     @Operation(summary = "Generate and send temporary credentials to one employee")
     public CredentialDeliveryResult sendCredentials(@PathVariable java.util.UUID employeeId, HttpSession session) {
-        return credentials.sendOne(access.organizationAdminId(session), employeeId);
+        java.util.UUID organizationId = access.organizationId(session);
+        EmployeeResponse employee = employees.findAll(organizationId).stream().filter(item -> item.id().equals(employeeId)).findFirst()
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+        access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
+        return credentials.sendOne(organizationId, employeeId);
     }
 }
