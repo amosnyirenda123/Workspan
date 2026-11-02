@@ -3,9 +3,9 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ilot
-      MYSQL_USER: ilot
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ilot_local_password}
+      MYSQL_DATABASE: workspan
+      MYSQL_USER: workspan
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-workspan_local_password}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_local_password}
     ports:
       - "${MYSQL_PORT:-3308}:3306"
@@ -22,8 +22,8 @@ services:
     environment:
       PMA_HOST: mysql
       PMA_PORT: 3306
-      PMA_USER: ilot
-      PMA_PASSWORD: ${MYSQL_PASSWORD:-ilot_local_password}
+      PMA_USER: workspan
+      PMA_PASSWORD: ${MYSQL_PASSWORD:-workspan_local_password}
     ports:
       - "8081:80"
     depends_on:
@@ -33,10 +33,18 @@ services:
     build: ./workspan-backend
     restart: unless-stopped
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ilot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: ilot
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-ilot_local_password}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/workspan?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: workspan
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-workspan_local_password}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_AUTH: ${SMTP_AUTH:-true}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@workspan.local}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     ports:
       - "8080:8080"
     depends_on:

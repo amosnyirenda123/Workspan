@@ -9,4 +9,7 @@ export const authService = {
   async register(payload: RegisterRequest): Promise<AuthUser> { return (await apiClient.post<AuthUser>('/auth/register', payload)).data },
   async login(payload: LoginRequest): Promise<AuthUser> { return (await apiClient.post<AuthUser>('/auth/login', payload)).data },
   async logout(): Promise<void> { await apiClient.post('/auth/logout') },
+  async changePassword(currentPassword: string, newPassword: string): Promise<AuthUser> {
+    return (await apiClient.post<AuthUser>('/auth/change-password', { currentPassword, newPassword })).data
+  },
 }
