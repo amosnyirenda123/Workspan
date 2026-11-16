@@ -34,7 +34,7 @@ public class AccessControlService {
     }
 
     public List<PermissionResponse> permissionCatalog() {
-        return PermissionCatalog.DEFINITIONS.stream().map(def -> new PermissionResponse(def.key(), def.label(), def.description(), def.category(), def.action())).toList();
+        return PermissionCatalog.DEFINITIONS.stream().map(def -> new PermissionResponse(def.key(), def.label(), def.description(), def.category(), def.action(), def.scopes())).toList();
     }
 
     public List<RoleResponse> roles(UUID organizationId, RoleScope scope, UUID contextId) {
@@ -96,8 +96,10 @@ public class AccessControlService {
     }
 
     @Transactional
-    public RoleAssignmentResponse assign(UUID organizationId, RoleScope scope, UUID contextId, RoleAssignmentRequest request) {
+    public RoleAssignmentResponse assign(UUID organizationId, RoleScope scope, UUID contextId, UUID actorId, RoleAssignmentRequest request) {
         validateContext(organizationId, scope, contextId);
+        if (actorId.equals(request.userId()))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot assign a role to your own account");
         UserAccount user = users.findByIdAndOrganizationId(request.userId(), organizationId)
                 .filter(item -> "ACTIVE".equals(item.getStatus())).orElseThrow(() -> notFound("Active organization member not found"));
         Role role = roles.findById(request.roleId()).filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope && sameContext(item, scope, contextId))
@@ -186,10 +188,7 @@ public class AccessControlService {
     }
     private boolean reserved(String name) { return RESERVED.contains(name.toUpperCase(Locale.ROOT)) || name.startsWith("SPACE_ADMIN - ") || name.startsWith("PROJECT_ADMIN - "); }
     private boolean allowedAtScope(RoleScope scope, String key) {
-        if (scope == RoleScope.ORGANIZATION) return true;
-        if (scope == RoleScope.SPACE) return !key.equals("organization.view") && !key.equals("space.create");
-        return Set.of("access.manage", "project.view", "project.edit", "project.delete", "project.resources.manage",
-                "task.view", "task.create", "task.edit", "task.delete", "analytics.view").contains(key);
+        return PermissionCatalog.allowedAt(scope, key);
     }
     private void rejectReserved(String name) { if (reserved(name)) throw badRequest("This role name is reserved for the platform"); }
     private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }

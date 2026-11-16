@@ -51,7 +51,7 @@ export function AnalyticsManager({ canViewEmployees, canViewResourcePools }: { c
   const metrics = useMemo(() => {
     if (!data) return null
     const today = new Date().toISOString().slice(0, 10)
-    const projectState = (project: Project) => project.startDate && today < project.startDate ? 'À venir' : project.endDate && today > project.endDate ? 'Terminés' : 'En cours'
+    const projectState = (project: Project) => project.endDate ? 'Terminés' : !project.startDate && project.baselineStart && today < project.baselineStart ? 'À venir' : 'En cours'
     const projectStates = ['En cours', 'À venir', 'Terminés'].map(label => ({ label, value: data.projects.filter(project => projectState(project) === label).length }))
     const taskStatuses = (['TODO', 'STARTED', 'BLOCKED', 'DONE'] as TaskStatus[]).map(status => ({ label: taskLabels[status], value: data.tasks.filter(task => task.status === status).length }))
     const employeeCounts = data.spaces.map(space => ({ label: space.name, value: data.employees.filter(employee => employee.spaceId === space.id).length })).sort((a, b) => b.value - a.value)

@@ -42,7 +42,7 @@ public class TaskResourceService {
                     .filter(item -> !item.getTask().getId().equals(taskId) && item.getTask().getStatus() != TaskStatus.DONE && overlaps(requested, window(item.getTask()))).toList();
             boolean alreadyAssigned = taskAllocations.findByTaskIdAndProjectResourceAllocationId(taskId, projectAllocation.getId()).isPresent();
             Integer quantity = null;
-            if (resource instanceof HumanResource) quantity = overlapping.isEmpty() ? 1 : 0;
+            if (resource instanceof HumanResource) quantity = Math.max(0, 100 - humanPeakLoad(resource, requested, taskId));
             else if (resource instanceof EquipmentResource)
                 quantity = Math.max(0, (projectAllocation.getAllocatedQuantity() == null ? 0 : projectAllocation.getAllocatedQuantity())
                         - overlapping.stream().mapToInt(item -> item.getAllocatedQuantity() == null ? 0 : item.getAllocatedQuantity()).sum());
@@ -55,23 +55,14 @@ public class TaskResourceService {
         }).toList();
     }
 
+    /**
+     * Schedule changes no longer block on employee/equipment concurrency: overlapping work is allowed and reported as
+     * overload by the workload analysis. The only hard rule left is that a task's resources belong to its project pool.
+     */
     public void validateSchedule(Task task, Project targetProject, TaskStatus targetStatus, LocalDate startDate, LocalDate endDate) {
-        List<TaskResourceAllocation> currentAssignments = taskAllocations.findAllByTaskIdOrderByAllocatedAtAsc(task.getId());
-        if (currentAssignments.isEmpty()) return;
-        Window requested = window(task, targetProject, startDate, endDate);
-        for (TaskResourceAllocation current : currentAssignments) {
-            ProjectResourceAllocation targetPoolAllocation = projectAllocations.findByProjectIdAndResourceId(targetProject.getId(), current.getProjectResourceAllocation().getResource().getId())
+        for (TaskResourceAllocation current : taskAllocations.findAllByTaskIdOrderByAllocatedAtAsc(task.getId())) {
+            projectAllocations.findByProjectIdAndResourceId(targetProject.getId(), current.getProjectResourceAllocation().getResource().getId())
                     .orElseThrow(() -> conflict("The task's resource must be in the target project's pool"));
-            Resource resource = targetPoolAllocation.getResource();
-            if (targetStatus == TaskStatus.DONE) continue;
-            List<TaskResourceAllocation> overlapping = taskAllocations.findAllByProjectResourceAllocationId(targetPoolAllocation.getId()).stream()
-                    .filter(item -> !item.getTask().getId().equals(task.getId()) && item.getTask().getStatus() != TaskStatus.DONE && overlaps(requested, window(item.getTask()))).toList();
-            if (resource instanceof HumanResource && !overlapping.isEmpty()) throw conflict("The task dates overlap another task using employee " + resource.getName());
-            if (resource instanceof EquipmentResource) {
-                long booked = overlapping.stream().mapToLong(item -> item.getAllocatedQuantity() == null ? 0 : item.getAllocatedQuantity()).sum();
-                if (booked + (current.getAllocatedQuantity() == null ? 0 : current.getAllocatedQuantity()) > (targetPoolAllocation.getAllocatedQuantity() == null ? 0 : targetPoolAllocation.getAllocatedQuantity()))
-                    throw conflict("The task dates exceed the project's available equipment for " + resource.getName());
-            }
         }
     }
 
@@ -83,28 +74,13 @@ public class TaskResourceService {
         taskAllocations.saveAll(current);
     }
 
+    /** nextStart / nextEnd are the project's new planned dates; tasks' planned dates must stay inside them. */
     public void validateProjectSchedule(Project project, LocalDate nextStart, LocalDate nextEnd) {
         for (Task task : tasks.findAllByProjectIdOrderByNameAsc(project.getId())) {
-            if (task.getStartDate() != null && nextStart != null && task.getStartDate().isBefore(nextStart))
-                throw badRequest("A project cannot start after the start date of task " + task.getName());
-            if (task.getEndDate() != null && nextEnd != null && task.getEndDate().isAfter(nextEnd))
-                throw badRequest("A project cannot end before the end date of task " + task.getName());
-            if (task.getStatus() == TaskStatus.DONE) continue;
-            Window requested = window(task, nextStart, nextEnd);
-            for (TaskResourceAllocation current : taskAllocations.findAllByTaskIdOrderByAllocatedAtAsc(task.getId())) {
-                ProjectResourceAllocation poolAllocation = current.getProjectResourceAllocation();
-                List<TaskResourceAllocation> overlaps = taskAllocations.findAllByProjectResourceAllocationId(poolAllocation.getId()).stream()
-                        .filter(other -> !other.getTask().getId().equals(task.getId()) && other.getTask().getStatus() != TaskStatus.DONE
-                                && overlaps(requested, other.getTask().getProject().getId().equals(project.getId())
-                                    ? window(other.getTask(), nextStart, nextEnd) : window(other.getTask()))).toList();
-                Resource resource = poolAllocation.getResource();
-                if (resource instanceof HumanResource && !overlaps.isEmpty()) throw conflict("Project dates overlap task assignments for employee " + resource.getName());
-                if (resource instanceof EquipmentResource) {
-                    long booked = overlaps.stream().mapToLong(item -> item.getAllocatedQuantity() == null ? 0 : item.getAllocatedQuantity()).sum();
-                    if (booked + (current.getAllocatedQuantity() == null ? 0 : current.getAllocatedQuantity()) > (poolAllocation.getAllocatedQuantity() == null ? 0 : poolAllocation.getAllocatedQuantity()))
-                        throw conflict("Project dates exceed task equipment availability for " + resource.getName());
-                }
-            }
+            if (task.getBaselineStart() != null && nextStart != null && task.getBaselineStart().isBefore(nextStart))
+                throw badRequest("A project cannot be planned to start after the planned start of task " + task.getName());
+            if (task.getBaselineEnd() != null && nextEnd != null && task.getBaselineEnd().isAfter(nextEnd))
+                throw badRequest("A project cannot be planned to end before the planned end of task " + task.getName());
         }
     }
 
@@ -123,16 +99,18 @@ public class TaskResourceService {
         if (requestedWindow.end() != null && requestedWindow.end().isBefore(LocalDate.now()))
             throw conflict("Resources cannot be assigned to a task whose scheduled period has ended");
         List<TaskResourceAllocation> existing = taskAllocations.findAllByProjectResourceAllocationId(projectAllocation.getId());
+        Integer allocationPercent = null;
         if (resource instanceof HumanResource) {
-            if (request.quantity() != null || request.amount() != null) throw badRequest("An employee is assigned as one person");
-            if (existing.stream().anyMatch(item -> overlaps(requestedWindow, window(item.getTask())) && item.getTask().getStatus() != TaskStatus.DONE))
-                throw conflict("This employee is already assigned to another task during this period");
+            // Overlapping assignments are allowed; the workload analysis reports days above 100% as overload.
+            if (request.quantity() != null || request.amount() != null) throw badRequest("An employee is assigned with a percentage of their time");
+            allocationPercent = request.allocationPercent() == null ? 100 : request.allocationPercent();
         } else if (resource instanceof EquipmentResource) {
-            if (request.quantity() == null || request.amount() != null) throw badRequest("Choose the number of equipment units to allocate");
-            long concurrent = existing.stream().filter(item -> overlaps(requestedWindow, window(item.getTask())) && item.getTask().getStatus() != TaskStatus.DONE)
-                    .mapToLong(item -> item.getAllocatedQuantity() == null ? 0 : item.getAllocatedQuantity()).sum();
-            if (concurrent + request.quantity() > projectAllocation.getAllocatedQuantity()) throw conflict("This allocation exceeds the project's available equipment");
+            // A single assignment cannot exceed the units allocated to the project; concurrent use is reported as overload.
+            if (request.quantity() == null || request.amount() != null || request.allocationPercent() != null) throw badRequest("Choose the number of equipment units to allocate");
+            if (request.quantity() > (projectAllocation.getAllocatedQuantity() == null ? 0 : projectAllocation.getAllocatedQuantity()))
+                throw conflict("This allocation exceeds the units allocated to the project");
         } else if (resource instanceof BudgetResource) {
+            if (request.allocationPercent() != null) throw badRequest("Choose a budget amount to allocate");
             if (request.amount() == null || request.quantity() != null) throw badRequest("Choose a budget amount to allocate");
             if (request.amount().signum() <= 0) throw badRequest("The budget amount must be greater than zero");
             BigDecimal concurrent = existing.stream()
@@ -144,6 +122,7 @@ public class TaskResourceService {
         TaskResourceAllocation allocation = new TaskResourceAllocation();
         allocation.setTask(task); allocation.setProjectResourceAllocation(projectAllocation);
         allocation.setAllocatedQuantity(request.quantity()); allocation.setAllocatedAmount(request.amount());
+        allocation.setAllocationPercent(allocationPercent);
         return response(taskAllocations.saveAndFlush(allocation), task);
     }
 
@@ -165,21 +144,20 @@ public class TaskResourceService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
     }
     private Window window(Task task) {
-        Project project = task.getProject();
-        return window(task, project, task.getStartDate(), task.getEndDate());
+        return window(task, task.getProject(), ScheduleDates.taskStart(task), ScheduleDates.taskEnd(task));
     }
+    /** taskStart / taskEnd are occupancy dates (actual when known, otherwise planned). */
     private Window window(Task task, Project project, LocalDate taskStart, LocalDate taskEnd) {
-        return window(task, project.getStartDate(), project.getEndDate(), taskStart, taskEnd);
+        return window(task, ScheduleDates.projectStart(project), ScheduleDates.projectEnd(project), taskStart, taskEnd);
     }
     private Window window(Task task, LocalDate projectStart, LocalDate projectEnd) {
-        return window(task, projectStart, projectEnd, task.getStartDate(), task.getEndDate());
+        return window(task, projectStart, projectEnd, ScheduleDates.taskStart(task), ScheduleDates.taskEnd(task));
     }
+    /** Falls back to the project window only when the task has no dates; real (late) task dates are never clamped. */
     private Window window(Task task, LocalDate projectStart, LocalDate projectEnd, LocalDate taskStart, LocalDate taskEnd) {
         LocalDate start = taskStart != null ? taskStart : projectStart;
         LocalDate end = taskEnd != null ? taskEnd : projectEnd;
-        if (projectStart != null && (start == null || start.isBefore(projectStart))) start = projectStart;
-        if (projectEnd != null && (end == null || end.isAfter(projectEnd))) end = projectEnd;
-        if (start != null && end != null && end.isBefore(start)) throw badRequest("Task dates do not overlap its project dates");
+        if (start != null && end != null && end.isBefore(start)) end = start;
         return new Window(start, end);
     }
     private boolean overlaps(Window left, Window right) {
@@ -197,8 +175,25 @@ public class TaskResourceService {
                 : window.end() == null ? null : window.end().plusDays(1);
         return new TaskResourceAllocationResponse(resource.getId(), resource.getName(), resource.getType(),
                 allocation.getAllocatedQuantity(), allocation.getAllocatedAmount(), currency, allocation.getAllocatedAt(),
-                window.start(), window.end(), availableFrom, active);
+                window.start(), window.end(), availableFrom, active,
+                resource instanceof HumanResource ? allocation.effectivePercent() : null);
     }
+    /** Highest daily charge (%) of an employee over a window, across all their unfinished task assignments. */
+    private int humanPeakLoad(Resource resource, Window requested, UUID excludedTaskId) {
+        List<TaskResourceAllocation> assignments = taskAllocations.findAllByProjectResourceAllocationResourceId(resource.getId()).stream()
+                .filter(item -> !item.getTask().getId().equals(excludedTaskId) && item.getTask().getStatus() != TaskStatus.DONE).toList();
+        if (assignments.isEmpty() || requested.start() == null || requested.end() == null) {
+            return assignments.stream().filter(item -> overlaps(requested, window(item.getTask()))).mapToInt(TaskResourceAllocation::effectivePercent).sum();
+        }
+        int peak = 0;
+        for (LocalDate day = requested.start(); !day.isAfter(requested.end()); day = day.plusDays(1)) {
+            Window single = new Window(day, day);
+            int load = assignments.stream().filter(item -> overlaps(single, window(item.getTask()))).mapToInt(TaskResourceAllocation::effectivePercent).sum();
+            peak = Math.max(peak, load);
+        }
+        return peak;
+    }
+
     private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
     private record Window(LocalDate start, LocalDate end) {}

@@ -5,12 +5,14 @@ import { TasksManager } from '../tasks/TasksManager'
 import { ResourcesManager } from '../resources/ResourcesManager'
 import { AccessManager } from '../access/AccessManager'
 import { AnalyticsManager } from '../analytics/AnalyticsManager'
+import { GanttManager } from '../gantt/GanttManager'
+import { WorkloadManager } from '../workload/WorkloadManager'
 import { accessService } from '../../api/accessService'
 import type { AccessManagementContext } from '../../api/types'
 import { canOrganization, canSpace } from '../../api/accessPermissions'
 import type { EffectiveAccess } from '../../api/types'
 
-type Section = 'spaces' | 'projects' | 'tasks' | 'resources' | 'access' | 'analytics'
+type Section = 'spaces' | 'projects' | 'tasks' | 'gantt' | 'workload' | 'resources' | 'access' | 'analytics'
 
 export type WorkspaceSection = Section
 
@@ -31,6 +33,8 @@ export function WorkspaceCrud({ onChange, section, onSectionChange, access, canV
   const showTasks = ['task.view', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'].some(hasProjectRight)
   const showResources = hasSpaceRight('resource.pool.view') || hasSpaceRight('resource.pool.manage')
   const showAnalytics = hasSpaceRight('analytics.view') || hasProjectRight('analytics.view')
+  const showGantt = hasProjectRight('gantt.view')
+  const showWorkload = hasSpaceRight('workload.view') || hasProjectRight('workload.view')
 
   useEffect(() => {
     if (!access || !accessContextReady) return
@@ -40,7 +44,9 @@ export function WorkspaceCrud({ onChange, section, onSectionChange, access, canV
     else if (section === 'resources' && !showResources) onSectionChange(canManageAccess ? 'access' : showProjects ? 'projects' : showTasks ? 'tasks' : 'spaces')
     else if (section === 'access' && !canManageAccess) onSectionChange(showResources ? 'resources' : showProjects ? 'projects' : showTasks ? 'tasks' : 'spaces')
     else if (section === 'analytics' && !showAnalytics) onSectionChange(showResources ? 'resources' : canManageAccess ? 'access' : showProjects ? 'projects' : showTasks ? 'tasks' : 'spaces')
-  }, [access, accessContextReady, section, showSpaces, showProjects, showTasks, showResources, showAnalytics, canManageAccess, onSectionChange])
+    else if (section === 'gantt' && !showGantt) onSectionChange(showTasks ? 'tasks' : showProjects ? 'projects' : showResources ? 'resources' : canManageAccess ? 'access' : 'spaces')
+    else if (section === 'workload' && !showWorkload) onSectionChange(showResources ? 'resources' : showTasks ? 'tasks' : showProjects ? 'projects' : canManageAccess ? 'access' : 'spaces')
+  }, [access, accessContextReady, section, showSpaces, showProjects, showTasks, showGantt, showWorkload, showResources, showAnalytics, canManageAccess, onSectionChange])
 
   return <section className="workspace-crud">
     <div className="crud-heading"><div><p className="eyebrow">GESTION DU TRAVAIL</p><h2>Espaces, projets et tâches</h2><p>Créez les éléments dans cet ordre : espace, projet, puis tâche.</p></div><button className="secondary-button" onClick={onChange}>Actualiser le résumé</button></div>
@@ -51,6 +57,8 @@ export function WorkspaceCrud({ onChange, section, onSectionChange, access, canV
       {canManageAccess && <button role="tab" aria-selected={section === 'access'} className={section === 'access' ? 'active' : ''} onClick={() => setSection('access')}>Rôles et permissions</button>}
       {showAnalytics && <button type="button" role="tab" aria-selected={section === 'analytics'} className={section === 'analytics' ? 'active' : ''} onClick={() => setSection('analytics')}>Analyses</button>}
       {showTasks && <button role="tab" aria-selected={section === 'tasks'} className={section === 'tasks' ? 'active' : ''} onClick={() => setSection('tasks')}>Tâches</button>}
+      {showGantt && <button type="button" role="tab" aria-selected={section === 'gantt'} className={section === 'gantt' ? 'active' : ''} onClick={() => setSection('gantt')}>Planification (Gantt)</button>}
+      {showWorkload && <button type="button" role="tab" aria-selected={section === 'workload'} className={section === 'workload' ? 'active' : ''} onClick={() => setSection('workload')}>Charge des ressources</button>}
     </div>
     {section === 'resources' && showResources && <ResourcesManager access={access} />}
     {section === 'access' && canManageAccess && <AccessManager />}
@@ -58,6 +66,8 @@ export function WorkspaceCrud({ onChange, section, onSectionChange, access, canV
     {section === 'spaces' && showSpaces && <SpacesManager access={access} onChange={onChange} />}
     {section === 'projects' && showProjects && <ProjectsManager access={access} onChange={onChange} />}
     {section === 'tasks' && showTasks && <TasksManager access={access} onChange={onChange} />}
-    {!showSpaces && !showProjects && !showTasks && !showResources && !canManageAccess && !showAnalytics && <div className="empty-state">Aucun accès n’a encore été attribué à votre compte.</div>}
+    {section === 'gantt' && showGantt && <GanttManager access={access} />}
+    {section === 'workload' && showWorkload && <WorkloadManager access={access} />}
+    {!showSpaces && !showProjects && !showTasks && !showGantt && !showWorkload && !showResources && !canManageAccess && !showAnalytics && <div className="empty-state">Aucun accès n’a encore été attribué à votre compte.</div>}
   </section>
 }

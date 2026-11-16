@@ -2,6 +2,7 @@ package com.workspan.workspanbackend.service;
 
 import com.workspan.workspanbackend.dto.CredentialBatchResponse;
 import com.workspan.workspanbackend.dto.CredentialDeliveryResult;
+import com.workspan.workspanbackend.entity.RoleScope;
 import com.workspan.workspanbackend.repository.HumanResourceRepository;
 import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,17 @@ public class EmployeeCredentialService {
     public CredentialDeliveryResult sendOne(UUID organizationId, UUID employeeId) {
         try {
             return sender.send(organizationId, employeeId, true);
+        } catch (ResponseStatusException exception) {
+            throw exception;
+        } catch (MailException exception) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                    "Email delivery failed. Check the SMTP settings and retry.");
+        }
+    }
+
+    public CredentialDeliveryResult invite(UUID organizationId, UUID employeeId, UUID roleId, RoleScope roleScope) {
+        try {
+            return sender.send(organizationId, employeeId, false, roleId, roleScope);
         } catch (ResponseStatusException exception) {
             throw exception;
         } catch (MailException exception) {

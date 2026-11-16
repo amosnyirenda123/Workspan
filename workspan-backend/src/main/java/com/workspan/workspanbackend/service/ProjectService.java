@@ -41,9 +41,9 @@ public class ProjectService {
     @Transactional
     public ProjectResponse create(UUID organizationId, UUID creatorId, ProjectRequest request) {
         Space space = requireSpace(request.spaceId(), organizationId);
-        validateDates(request.startDate(), request.endDate());
+        validateDates(request.baselineStart(), request.baselineEnd());
         Project project = new Project(space, request.name().trim(), request.description());
-        project.setStartDate(request.startDate()); project.setEndDate(request.endDate());
+        project.setBaselineStart(request.baselineStart()); project.setBaselineEnd(request.baselineEnd());
         Project saved = projects.save(project);
         roleProvisioner.assignProjectOwner(organizationId, creatorId, saved);
         return response(saved);
@@ -55,12 +55,13 @@ public class ProjectService {
         Space nextSpace = requireSpace(request.spaceId(), organizationId);
         if (!project.getSpace().getId().equals(nextSpace.getId()) && allocations.existsByProjectId(id))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove project resources before moving it to another space");
-        validateDates(request.startDate(), request.endDate());
-        validateResourceSchedule(project, request.startDate(), request.endDate());
-        taskResourceService.validateProjectSchedule(project, request.startDate(), request.endDate());
+        validateDates(request.baselineStart(), request.baselineEnd());
+        validateResourceSchedule(project, ScheduleDates.earliest(request.baselineStart(), project.getStartDate()),
+                project.getEndDate() != null ? project.getEndDate() : request.baselineEnd());
+        taskResourceService.validateProjectSchedule(project, request.baselineStart(), request.baselineEnd());
         project.setSpace(nextSpace);
         project.setName(request.name().trim()); project.setDescription(request.description());
-        project.setStartDate(request.startDate()); project.setEndDate(request.endDate());
+        project.setBaselineStart(request.baselineStart()); project.setBaselineEnd(request.baselineEnd());
         return response(projects.save(project));
     }
 
@@ -79,17 +80,16 @@ public class ProjectService {
 
     private void validateDates(java.time.LocalDate start, java.time.LocalDate end) {
         if (start != null && end != null && end.isBefore(start))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "End date cannot be before start date");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The planned end date cannot be before the planned start date");
     }
 
+    /** nextStart / nextEnd are the project's occupancy window after the change (actual when known, otherwise planned). */
     private void validateResourceSchedule(Project project, LocalDate nextStart, LocalDate nextEnd) {
         List<ProjectResourceAllocation> ownAllocations = allocations.findAllByProjectIdOrderByResourceTypeAscResourceNameAsc(project.getId());
         for (ProjectResourceAllocation own : ownAllocations) {
             List<ProjectResourceAllocation> overlaps = allocations.findAllByResourceId(own.getResource().getId()).stream()
                     .filter(other -> !other.getProject().getId().equals(project.getId())
-                            && overlaps(nextStart, nextEnd, other.getProject().getStartDate(), other.getProject().getEndDate())).toList();
-            if (own.getResource() instanceof HumanResource && !overlaps.isEmpty())
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Project dates overlap another project using employee " + own.getResource().getName());
+                            && overlaps(nextStart, nextEnd, ScheduleDates.projectStart(other.getProject()), ScheduleDates.projectEnd(other.getProject()))).toList();
             if (own.getResource() instanceof EquipmentResource equipment) {
                 long booked = overlaps.stream().mapToLong(other -> other.getAllocatedQuantity() == null ? 0 : other.getAllocatedQuantity()).sum();
                 if (booked + (own.getAllocatedQuantity() == null ? 0 : own.getAllocatedQuantity()) > equipment.getQuantity())
@@ -103,6 +103,7 @@ public class ProjectService {
     }
 
     private ProjectResponse response(Project project) {
-        return new ProjectResponse(project.getId(), project.getSpace().getId(), project.getName(), project.getDescription(), project.getStartDate(), project.getEndDate(), project.getCreatedAt());
+        return new ProjectResponse(project.getId(), project.getSpace().getId(), project.getName(), project.getDescription(),
+                project.getBaselineStart(), project.getBaselineEnd(), project.getStartDate(), project.getEndDate(), project.getCreatedAt());
     }
 }

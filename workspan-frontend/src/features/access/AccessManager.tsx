@@ -8,6 +8,7 @@ const isBuiltInRole = (name: string) => ['ADMIN', 'EMPLOYEE'].includes(name) || 
 
 export function AccessManager() {
   const [context, setContext] = useState<AccessManagementContext | null>(null)
+  const [currentUserId, setCurrentUserId] = useState('')
   const [scope, setScope] = useState<RoleScope>('ORGANIZATION')
   const [contextId, setContextId] = useState('')
   const [permissions, setPermissions] = useState<PermissionDefinition[]>([])
@@ -27,9 +28,10 @@ export function AccessManager() {
 
   useEffect(() => {
     let active = true
-    accessService.managementContext().then(data => {
+    Promise.all([accessService.managementContext(), accessService.effective()]).then(([data, effective]) => {
       if (!active) return
       setContext(data)
+      setCurrentUserId(effective.userId)
       const initialScope: RoleScope = data.canManageOrganization ? 'ORGANIZATION' : data.spaces.length ? 'SPACE' : 'PROJECT'
       setScope(initialScope)
       setContextId(initialScope === 'ORGANIZATION' ? data.organizationId : initialScope === 'SPACE' ? data.spaces[0]?.id ?? '' : data.projects[0]?.id ?? '')
@@ -40,9 +42,8 @@ export function AccessManager() {
   }, [])
 
   const options = useMemo(() => scope === 'SPACE' ? context?.spaces ?? [] : scope === 'PROJECT' ? context?.projects ?? [] : [], [context, scope])
-  const visiblePermissions = permissions.filter(permission => scope === 'ORGANIZATION'
-    || (scope === 'SPACE' ? !['organization.view', 'space.create'].includes(permission.key)
-      : ['access.manage', 'analytics.view', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'].includes(permission.key)))
+  // The backend catalogue says at which scopes each permission can be granted.
+  const visiblePermissions = permissions.filter(permission => permission.scopes.includes(scope))
   const permissionActions = [...new Set(visiblePermissions.map(permission => permission.action))]
   const permissionCategories = [...new Set(visiblePermissions.map(permission => permission.category))]
   const filteredPermissions = visiblePermissions.filter(permission => (permissionActionFilter === 'ALL' || permission.action === permissionActionFilter)
@@ -61,7 +62,8 @@ export function AccessManager() {
     ])
     setRoles(roleData); setAssignments(assignmentData); setMembers(memberData)
     setRoleId(current => roleData.some(role => role.id === current) ? current : roleData[0]?.id ?? '')
-    setMemberId(current => memberData.some(member => member.userId === current) ? current : memberData[0]?.userId ?? '')
+    setMemberId(current => memberData.some(member => member.userId === current && member.userId !== currentUserId)
+      ? current : memberData.find(member => member.userId !== currentUserId)?.userId ?? '')
   }
 
   useEffect(() => {
@@ -72,11 +74,11 @@ export function AccessManager() {
       .then(([roleData, assignmentData, memberData]) => {
         if (!active) return
         setRoles(roleData); setAssignments(assignmentData); setMembers(memberData)
-        setRoleId(roleData[0]?.id ?? ''); setMemberId(memberData[0]?.userId ?? '')
+        setRoleId(roleData[0]?.id ?? ''); setMemberId(memberData.find(member => member.userId !== currentUserId)?.userId ?? '')
       }).catch(cause => { if (active) setError(getApiErrorMessage(cause, 'Impossible de charger les rôles de ce périmètre.')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [scope, contextId])
+  }, [scope, contextId, currentUserId])
 
   function changeScope(next: RoleScope) {
     setScope(next)
@@ -131,7 +133,7 @@ export function AccessManager() {
     <section className="form-panel access-scope-panel"><div className="form-grid">
       <div className="form-field"><label htmlFor="access-scope">Périmètre</label><select id="access-scope" value={scope} onChange={event => changeScope(event.target.value as RoleScope)}><option value="ORGANIZATION" disabled={!context.canManageOrganization}>Organisation</option><option value="SPACE" disabled={!context.spaces.length}>Espace</option><option value="PROJECT" disabled={!context.projects.length}>Projet</option></select></div>
       {scope !== 'ORGANIZATION' && <div className="form-field"><label htmlFor="access-context">{scope === 'SPACE' ? 'Espace' : 'Projet'}</label><select id="access-context" value={contextId} onChange={event => setContextId(event.target.value)}>{options.map(option => <option key={option.id} value={option.id}>{option.parentName ? `${option.parentName} · ` : ''}{option.name}</option>)}</select></div>}
-    </div></section>
+    </div><p className="field-hint access-scope-hint">Les permissions d’organisation s’appliquent à tous les espaces et projets. Celles d’un espace s’appliquent aussi à ses projets; celles d’un projet restent limitées à ce projet.</p></section>
     {error && <div className="alert form-alert" role="alert">{error}</div>}
     {loading ? <div className="empty-state">Chargement des rôles…</div> : <div className="access-layout">
       <section className="form-panel crud-form-panel">
@@ -145,11 +147,11 @@ export function AccessManager() {
         </form>
       </section>
       <section className="access-right-column">
-        <div className="crud-list-panel"><div className="section-heading"><div><h2>Rôles disponibles</h2><p>{scope === 'ORGANIZATION' ? 'Ces rôles s’appliquent dans toute l’organisation.' : 'Ces rôles peuvent être attribués dans le périmètre sélectionné.'}</p></div><span className="count-pill">{roles.length}</span></div>
+        <div className="crud-list-panel"><div className="section-heading"><div><h2>Rôles d’accès disponibles</h2><p>{scope === 'ORGANIZATION' ? 'Ces rôles s’appliquent dans toute l’organisation.' : 'Ces rôles peuvent être attribués dans le périmètre sélectionné.'}</p></div><span className="count-pill">{roles.length}</span></div>
           {roles.length ? roles.map(role => <article className="crud-row" key={role.id}><div className="crud-symbol violet">R</div><div className="crud-row-main"><strong>{role.name}</strong><small>{role.permissionKeys.length} permission(s)</small></div><div className="crud-actions"><button type="button" className="secondary-button" disabled={saving || isBuiltInRole(role.name)} onClick={() => editRole(role)}>Modifier</button>{!isBuiltInRole(role.name) && <button type="button" className="danger-button" disabled={saving} onClick={() => void deleteRole(role)}>Supprimer</button>}</div></article>) : <div className="empty-state">Aucun rôle dans ce périmètre.</div>}
         </div>
-        <div className="crud-list-panel access-assignment-panel"><div className="section-heading"><div><h2>Attribuer un rôle</h2><p>Seuls les comptes actifs de l’organisation sont listés.</p></div></div>
-          <form className="access-assignment-form" onSubmit={assign}><div className="form-field"><label htmlFor="access-member">Membre</label><select id="access-member" value={memberId} onChange={event => setMemberId(event.target.value)}><option value="">Choisir un membre</option>{members.map(member => <option key={member.userId} value={member.userId}>{member.displayName} · {member.email}</option>)}</select></div><div className="form-field"><label htmlFor="access-role">Rôle</label><select id="access-role" value={roleId} onChange={event => setRoleId(event.target.value)}><option value="">Choisir un rôle</option>{roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></div><button className="primary-button" disabled={saving || !memberId || !roleId}>{saving ? 'Enregistrement…' : 'Attribuer'}</button></form>
+        <div className="crud-list-panel access-assignment-panel"><div className="section-heading"><div><h2>Attribuer un rôle d’accès</h2><p>Un rôle définit les permissions du compte; il est distinct de l’intitulé du poste de l’employé. Seuls les comptes actifs sont listés.</p></div></div>
+          <form className="access-assignment-form" onSubmit={assign}><div className="form-field"><label htmlFor="access-member">Membre</label><select id="access-member" value={memberId} onChange={event => setMemberId(event.target.value)}><option value="">Choisir un membre</option>{members.map(member => <option key={member.userId} value={member.userId} disabled={member.userId === currentUserId}>{member.displayName} · {member.email}{member.userId === currentUserId ? ' (vous)' : ''}</option>)}</select></div><div className="form-field"><label htmlFor="access-role">Rôle d’accès</label><select id="access-role" value={roleId} onChange={event => setRoleId(event.target.value)}><option value="">Choisir un rôle</option>{roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></div><button className="primary-button" disabled={saving || !memberId || !roleId || memberId === currentUserId}>{saving ? 'Enregistrement…' : 'Attribuer'}</button></form><p className="field-hint">Pour éviter une élévation accidentelle des droits, vous ne pouvez pas vous attribuer un rôle. Demandez à un autre gestionnaire de le faire.</p>
           {assignments.map(item => <article className="crud-row" key={`${item.userId}-${item.roleId}`}><div className="crud-symbol green">{item.displayName.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{item.displayName} · {item.roleName}</strong><small>{item.email}</small></div><div className="crud-actions"><button type="button" className="danger-button" disabled={saving || item.roleName === 'ADMIN'} onClick={() => void unassign(item)}>Retirer</button></div></article>)}
         </div>
       </section>

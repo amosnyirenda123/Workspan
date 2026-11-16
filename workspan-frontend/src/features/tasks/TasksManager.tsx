@@ -7,7 +7,8 @@ import type { Project, Task, TaskRequest, TaskStatus } from '../../api/types'
 import type { EffectiveAccess } from '../../api/types'
 import { canProject } from '../../api/accessPermissions'
 
-const emptyForm: TaskRequest = { projectId: '', name: '', status: 'TODO', startDate: '', endDate: '' }
+const emptyForm: TaskRequest = { projectId: '', name: '', status: 'TODO', baselineStart: '', baselineEnd: '', startDate: '', endDate: '', progress: 0 }
+const formatDate = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('fr-FR') : null
 const statusLabels: Record<TaskStatus, string> = { TODO: 'À faire', STARTED: 'En cours', BLOCKED: 'Bloquée', DONE: 'Terminée' }
 
 export function TasksManager({ onChange, access }: { onChange: () => void; access: EffectiveAccess | null }) {
@@ -32,15 +33,18 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError('')
     try {
-      const saved = editingId ? await taskService.update(editingId, form) : await taskService.create(form)
+      const payload: TaskRequest = { ...form, baselineStart: form.baselineStart || null, baselineEnd: form.baselineEnd || null,
+        startDate: form.startDate || null, endDate: form.endDate || null, progress: form.progress ?? 0 }
+      const saved = editingId ? await taskService.update(editingId, payload) : await taskService.create(payload)
       setTasks(current => editingId ? current.map(item => item.id === saved.id ? saved : item) : [...current, saved].sort((a, b) => a.name.localeCompare(b.name)))
-      setForm(emptyForm); setEditingId(null); onChange()
+      // Keep the project selected so the next task can be created right away.
+      setForm(editingId ? emptyForm : { ...emptyForm, projectId: form.projectId }); setEditingId(null); onChange()
     } catch (cause) { setError(getApiErrorMessage(cause, 'Impossible d’enregistrer cette tâche.')) }
     finally { setSaving(false) }
   }
 
   function edit(task: Task) {
-    setForm({ projectId: task.projectId, name: task.name, status: task.status, startDate: task.startDate ?? '', endDate: task.endDate ?? '' })
+    setForm({ projectId: task.projectId, name: task.name, status: task.status, baselineStart: task.baselineStart ?? '', baselineEnd: task.baselineEnd ?? '', startDate: task.startDate ?? '', endDate: task.endDate ?? '', progress: task.progress })
     setEditingId(task.id); setError('')
   }
 
@@ -54,6 +58,8 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
     finally { setSaving(false) }
   }
 
+  const selectedProject = projects.find(project => project.id === form.projectId)
+  const today = new Date().toISOString().slice(0, 10)
   const projectName = (id: string) => projects.find(project => project.id === id)?.name ?? 'Projet indisponible'
   const canCreate = (projectId: string) => { const project = projects.find(item => item.id === projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.create') }
   const canEdit = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.edit') }
@@ -68,14 +74,17 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
         <div className="form-field full-width"><label htmlFor="task-project">Projet <span>*</span></label><select id="task-project" required value={form.projectId} onChange={event => setForm({ ...form, projectId: event.target.value })}><option value="">Choisir un projet</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
         <div className="form-field full-width"><label htmlFor="task-name">Nom de la tâche <span>*</span></label><input id="task-name" required maxLength={160} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></div>
         <div className="form-field full-width"><label htmlFor="task-status">Statut</label><select id="task-status" value={form.status} onChange={event => setForm({ ...form, status: event.target.value as TaskStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-        <div className="form-field"><label htmlFor="task-start">Date de début</label><input id="task-start" type="date" value={form.startDate ?? ''} onChange={event => setForm({ ...form, startDate: event.target.value })} /></div>
-        <div className="form-field"><label htmlFor="task-end">Date de fin</label><input id="task-end" type="date" value={form.endDate ?? ''} onChange={event => setForm({ ...form, endDate: event.target.value })} /></div>
+        <div className="form-field"><label htmlFor="task-planned-start">Début planifié</label><input id="task-planned-start" type="date" min={selectedProject?.baselineStart ?? undefined} max={selectedProject?.baselineEnd ?? undefined} value={form.baselineStart ?? ''} onChange={event => setForm({ ...form, baselineStart: event.target.value })} /></div>
+        <div className="form-field"><label htmlFor="task-planned-end">Fin planifiée</label><input id="task-planned-end" type="date" min={form.baselineStart || selectedProject?.baselineStart || undefined} max={selectedProject?.baselineEnd ?? undefined} value={form.baselineEnd ?? ''} onChange={event => setForm({ ...form, baselineEnd: event.target.value })} /></div>
+        {form.status !== 'TODO' && <div className="form-field"><label htmlFor="task-actual-start">Début réel</label><input id="task-actual-start" type="date" max={today} value={form.startDate ?? ''} onChange={event => setForm({ ...form, startDate: event.target.value })} /><small className="field-hint">Vide : aujourd’hui au passage « En cours ».</small></div>}
+        {form.status === 'DONE' && <div className="form-field"><label htmlFor="task-actual-end">Fin réelle</label><input id="task-actual-end" type="date" min={form.startDate || undefined} max={today} value={form.endDate ?? ''} onChange={event => setForm({ ...form, endDate: event.target.value })} /><small className="field-hint">Vide : aujourd’hui.</small></div>}
+        {(form.status === 'STARTED' || form.status === 'BLOCKED') && <div className="form-field full-width"><label htmlFor="task-progress">Avancement : {form.progress ?? 0} %</label><input id="task-progress" type="range" min={0} max={99} step={5} value={form.progress ?? 0} onChange={event => setForm({ ...form, progress: Number(event.target.value) })} /></div>}
       </div>
       {error && <div className="alert form-alert" role="alert">{error}</div>}{projects.length === 0 && <p className="field-hint">Créez un projet avant d’ajouter une tâche.</p>}
-      <div className="form-actions"><button className="primary-button" disabled={saving || projects.length === 0 || (!editingId && !canCreate(form.projectId))}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer la tâche'}</button>{editingId && <button type="button" className="secondary-button" onClick={() => { setEditingId(null); setForm(emptyForm) }}>Annuler</button>}</div></form>
+      <div className="form-actions"><button className="primary-button" aria-busy={saving} disabled={saving || projects.length === 0 || (!editingId && !canCreate(form.projectId))}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer la tâche'}</button>{editingId && <button type="button" className="secondary-button" onClick={() => { setEditingId(null); setForm(emptyForm) }}>Annuler</button>}</div></form>
     </section>}
     <section className="crud-list-panel" aria-live="polite">
-      {loading ? <div className="empty-state">Chargement des tâches…</div> : tasks.length ? tasks.map(task => <article className="crud-row" key={task.id}><div className="crud-symbol green">T</div><div className="crud-row-main"><strong>{task.name}</strong><small>{projectName(task.projectId)} · {statusLabels[task.status]}</small></div><div className="crud-actions">{canEdit(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(task)}>Modifier</button>}{canManageResources(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesTaskId(current => current === task.id ? null : task.id)}>Ressources</button>}{canDelete(task) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(task)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucune tâche</strong><p>Choisissez un projet pour créer votre première tâche.</p></div>}
+      {loading ? <div className="empty-state">Chargement des tâches…</div> : tasks.length ? tasks.map(task => <article className="crud-row" key={task.id}><div className="crud-symbol green">T</div><div className="crud-row-main"><strong>{task.name}</strong><small>{projectName(task.projectId)} · {statusLabels[task.status]}{task.status === 'STARTED' || task.status === 'BLOCKED' ? ` (${task.progress} %)` : ''}{task.baselineStart || task.baselineEnd ? ` · Planifié : ${formatDate(task.baselineStart) ?? '?'} → ${formatDate(task.baselineEnd) ?? '?'}` : ''}{task.startDate ? ` · Réel : ${formatDate(task.startDate)} → ${formatDate(task.endDate) ?? 'en cours'}` : ''}</small></div><div className="crud-actions">{canEdit(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(task)}>Modifier</button>}{canManageResources(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesTaskId(current => current === task.id ? null : task.id)}>Ressources</button>}{canDelete(task) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(task)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucune tâche</strong><p>Choisissez un projet pour créer votre première tâche.</p></div>}
     </section>
     {resourcesTaskId && tasks.find(task => task.id === resourcesTaskId && canManageResources(task)) && projects.find(project => project.id === tasks.find(task => task.id === resourcesTaskId)?.projectId) && <TaskResourcesPanel key={`${resourcesTaskId}-${tasks.find(task => task.id === resourcesTaskId)?.status}-${tasks.find(task => task.id === resourcesTaskId)?.startDate}-${tasks.find(task => task.id === resourcesTaskId)?.endDate}`} task={tasks.find(task => task.id === resourcesTaskId)!} project={projects.find(project => project.id === tasks.find(task => task.id === resourcesTaskId)?.projectId)!} onClose={() => setResourcesTaskId(null)} />}
   </div>

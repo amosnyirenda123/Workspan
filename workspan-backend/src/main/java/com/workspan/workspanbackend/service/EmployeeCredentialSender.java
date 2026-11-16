@@ -1,8 +1,19 @@
 package com.workspan.workspanbackend.service;
 
 import com.workspan.workspanbackend.dto.CredentialDeliveryResult;
-import com.workspan.workspanbackend.entity.*;
-import com.workspan.workspanbackend.repository.*;
+import com.workspan.workspanbackend.entity.HumanResource;
+import com.workspan.workspanbackend.entity.Organization;
+import com.workspan.workspanbackend.entity.OrganizationRoleAssignment;
+import com.workspan.workspanbackend.entity.Role;
+import com.workspan.workspanbackend.entity.RoleScope;
+import com.workspan.workspanbackend.entity.SpaceRoleAssignment;
+import com.workspan.workspanbackend.entity.UserAccount;
+import com.workspan.workspanbackend.repository.HumanResourceRepository;
+import com.workspan.workspanbackend.repository.OrganizationRoleAssignmentRepository;
+import com.workspan.workspanbackend.repository.RoleRepository;
+import com.workspan.workspanbackend.repository.RolePermissionRepository;
+import com.workspan.workspanbackend.repository.SpaceRoleAssignmentRepository;
+import com.workspan.workspanbackend.repository.UserAccountRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
@@ -22,7 +33,9 @@ public class EmployeeCredentialSender {
     private final HumanResourceRepository employees;
     private final UserAccountRepository users;
     private final RoleRepository roles;
-    private final OrganizationRoleAssignmentRepository assignments;
+    private final RolePermissionRepository rolePermissions;
+    private final OrganizationRoleAssignmentRepository organizationAssignments;
+    private final SpaceRoleAssignmentRepository spaceAssignments;
     private final PasswordHasher hasher;
     private final JavaMailSender mailSender;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -30,14 +43,18 @@ public class EmployeeCredentialSender {
     private final String frontendUrl;
 
     public EmployeeCredentialSender(HumanResourceRepository employees, UserAccountRepository users,
-                                    RoleRepository roles, OrganizationRoleAssignmentRepository assignments,
+                                    RoleRepository roles, RolePermissionRepository rolePermissions,
+                                    OrganizationRoleAssignmentRepository organizationAssignments,
+                                    SpaceRoleAssignmentRepository spaceAssignments,
                                     PasswordHasher hasher, JavaMailSender mailSender,
                                     @Value("${workspan.mail.from:no-reply@workspan.local}") String from,
                                     @Value("${workspan.frontend-url:http://localhost:5173}") String frontendUrl) {
         this.employees = employees;
         this.users = users;
         this.roles = roles;
-        this.assignments = assignments;
+        this.rolePermissions = rolePermissions;
+        this.organizationAssignments = organizationAssignments;
+        this.spaceAssignments = spaceAssignments;
         this.hasher = hasher;
         this.mailSender = mailSender;
         this.from = from;
@@ -46,6 +63,11 @@ public class EmployeeCredentialSender {
 
     @Transactional
     public CredentialDeliveryResult send(UUID organizationId, UUID employeeId, boolean forceResend) {
+        return send(organizationId, employeeId, forceResend, null, null);
+    }
+
+    @Transactional
+    public CredentialDeliveryResult send(UUID organizationId, UUID employeeId, boolean forceResend, UUID roleId, RoleScope roleScope) {
         HumanResource employee = employees.findByIdAndSpaceOrganizationId(employeeId, organizationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
         Organization organization = employee.getSpace().getOrganization();
@@ -58,7 +80,12 @@ public class EmployeeCredentialSender {
         if (user != null && !forceResend && user.getCredentialEmailSentAt() != null) {
             return new CredentialDeliveryResult(employee.getId(), email, "SKIPPED", "Credentials were already sent", user.getCredentialEmailSentAt());
         }
+        if (user == null && roleId == null && !forceResend) {
+            return new CredentialDeliveryResult(employee.getId(), email, "SKIPPED", "Choose an access role and invite this employee individually", null);
+        }
         if (user == null) {
+            if (roleId == null || roleScope == null)
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an access role before inviting this employee");
             if (users.existsByEmailIgnoreCase(email)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "This email already belongs to another account");
             }
@@ -66,6 +93,8 @@ public class EmployeeCredentialSender {
             user.setOrganization(organization);
             user.setEmail(email);
             user.setDisplayName(employee.getName());
+        } else if (roleId != null || roleScope != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This employee already has an account");
         } else if (!user.getEmail().equalsIgnoreCase(email)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Employee email does not match the linked account");
         }
@@ -75,28 +104,49 @@ public class EmployeeCredentialSender {
         user.setStatus("ACTIVE");
         user.setMustChangePassword(true);
 
-        Role employeeRole = roles.findByOrganizationIdAndNameAndScope(organization.getId(), "EMPLOYEE", RoleScope.ORGANIZATION)
-                .orElseGet(() -> {
-                    Role role = new Role();
-                    role.setOrganization(organization);
-                    role.setName("EMPLOYEE");
-                    role.setScope(RoleScope.ORGANIZATION);
-                    return roles.save(role);
-                });
         UserAccount savedUser = users.saveAndFlush(user);
-        if (!assignments.existsByUserIdAndRoleId(savedUser.getId(), employeeRole.getId())) {
-            OrganizationRoleAssignment assignment = new OrganizationRoleAssignment();
-            assignment.setUser(savedUser);
-            assignment.setRole(employeeRole);
-            assignments.save(assignment);
-        }
         employee.setUser(savedUser);
+        if (roleId != null) assignRole(organizationId, employee, savedUser, roleId, roleScope);
 
         sendMessage(email, employee.getName(), organization.getName(), temporaryPassword);
         Instant sentAt = Instant.now();
         savedUser.setCredentialEmailSentAt(sentAt);
         users.save(savedUser);
         return new CredentialDeliveryResult(employee.getId(), email, "SENT", "Temporary credentials sent", sentAt);
+    }
+
+    private void assignRole(UUID organizationId, HumanResource employee, UserAccount user, UUID roleId, RoleScope scope) {
+        Role role = roles.findById(roleId)
+                .filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role available for this employee's scope"));
+        String roleName = role.getName().toUpperCase(Locale.ROOT);
+        if (roleName.equals("ADMIN") || roleName.equals("EMPLOYEE") || roleName.startsWith("SPACE_ADMIN - ") || roleName.startsWith("PROJECT_ADMIN - "))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a custom access role");
+        if (!rolePermissions.existsByRoleId(role.getId()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role with at least one permission");
+
+        if (scope == RoleScope.ORGANIZATION) {
+            if (role.getScopeSpace() != null || role.getScopeProject() != null)
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an organization role");
+            if (!organizationAssignments.existsByUserIdAndRoleId(user.getId(), role.getId())) {
+                OrganizationRoleAssignment assignment = new OrganizationRoleAssignment();
+                assignment.setUser(user);
+                assignment.setRole(role);
+                organizationAssignments.save(assignment);
+            }
+        } else if (scope == RoleScope.SPACE) {
+            if (role.getScopeSpace() == null || !role.getScopeSpace().getId().equals(employee.getSpace().getId()) || role.getScopeProject() != null)
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role for the employee's space");
+            if (spaceAssignments.findByUserIdAndRoleIdAndSpaceId(user.getId(), role.getId(), employee.getSpace().getId()).isEmpty()) {
+                SpaceRoleAssignment assignment = new SpaceRoleAssignment();
+                assignment.setUser(user);
+                assignment.setRole(role);
+                assignment.setSpace(employee.getSpace());
+                spaceAssignments.save(assignment);
+            }
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project roles cannot be assigned during employee invitations");
+        }
     }
 
     private String generatePassword() {

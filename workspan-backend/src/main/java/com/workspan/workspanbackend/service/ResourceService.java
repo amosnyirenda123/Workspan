@@ -94,7 +94,7 @@ public class ResourceService {
     private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private boolean isProjectAllocationActive(ProjectResourceAllocation allocation) {
         LocalDate today = LocalDate.now();
-        return (allocation.getProject().getStartDate() == null || !today.isBefore(allocation.getProject().getStartDate()))
-                && (allocation.getProject().getEndDate() == null || !today.isAfter(allocation.getProject().getEndDate()));
+        return (ScheduleDates.projectStart(allocation.getProject()) == null || !today.isBefore(ScheduleDates.projectStart(allocation.getProject())))
+                && (ScheduleDates.projectEnd(allocation.getProject()) == null || !today.isAfter(ScheduleDates.projectEnd(allocation.getProject())));
     }
 }
