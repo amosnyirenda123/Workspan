@@ -191,7 +191,7 @@ public class AccessControlService {
         if (scope == RoleScope.ORGANIZATION) return true;
         if (scope == RoleScope.SPACE) return !key.equals("organization.view") && !key.equals("space.create");
         return Set.of("access.manage", "project.view", "project.edit", "project.delete", "project.resources.manage",
-                "task.view", "task.create", "task.edit", "task.delete", "analytics.view").contains(key);
+                "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "analytics.view").contains(key);
     }
     private void rejectReserved(String name) { if (reserved(name)) throw badRequest("This role name is reserved for the platform"); }
     private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }

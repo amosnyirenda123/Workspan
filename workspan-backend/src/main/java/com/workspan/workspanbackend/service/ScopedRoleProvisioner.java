@@ -29,7 +29,7 @@ public class ScopedRoleProvisioner {
         Role role = ensureRole(space.getOrganization(), roleName, RoleScope.SPACE, space, null,
                 List.of("space.view", "space.edit", "space.delete", "employee.view", "employee.create", "employee.manage_accounts",
                         "resource.pool.view", "resource.pool.manage", "analytics.view", "project.view", "project.create", "project.edit", "project.delete",
-                        "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "access.manage"));
+                        "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "access.manage"));
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (spaceAssignments.findByUserIdAndRoleIdAndSpaceId(userId, role.getId(), space.getId()).isEmpty()) {
             SpaceRoleAssignment assignment = new SpaceRoleAssignment(); assignment.setUser(user); assignment.setRole(role); assignment.setSpace(space);
@@ -42,7 +42,7 @@ public class ScopedRoleProvisioner {
         String roleName = "PROJECT_ADMIN - " + project.getId().toString().substring(0, 8);
         Role role = ensureRole(project.getSpace().getOrganization(), roleName, RoleScope.PROJECT, null, project,
                 List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "analytics.view",
-                        "task.view", "task.create", "task.edit", "task.delete", "access.manage"));
+                        "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "access.manage"));
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (projectAssignments.findByUserIdAndRoleIdAndProjectId(userId, role.getId(), project.getId()).isEmpty()) {
             ProjectRoleAssignment assignment = new ProjectRoleAssignment(); assignment.setUser(user); assignment.setRole(role); assignment.setProject(project);

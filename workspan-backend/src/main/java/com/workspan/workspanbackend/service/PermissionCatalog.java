@@ -31,6 +31,10 @@ public final class PermissionCatalog {
         return new Definition(key, label, description, category, action);
     }
 
+    private static Definition taskView(String key, String label, String description) {
+        return new Definition(key, label, description, "Tâches", "Consulter");
+    }
+
     public static final List<Definition> DEFINITIONS = List.of(
             define("organization.view", "View organization overview", "See organization level information."),
             define("analytics.view", "View analytics", "See available project, employee, resource, and budget allocation analytics."),
@@ -49,6 +53,8 @@ public final class PermissionCatalog {
             define("project.delete", "Delete projects", "Delete projects."),
             define("project.resources.manage", "Manage project resources", "Assign and release project resources."),
             define("task.view", "View tasks", "See tasks in accessible projects."),
+            taskView("task.view.kanban", "View Kanban boards", "See tasks arranged by status in Kanban columns."),
+            taskView("task.view.scrum", "View Scrum boards", "See the backlog and sprint work organized by status."),
             define("task.create", "Create tasks", "Add tasks to accessible projects."),
             define("task.edit", "Edit tasks", "Update tasks and their status."),
             define("task.delete", "Delete tasks", "Delete tasks."),

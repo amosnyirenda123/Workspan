@@ -26,9 +26,9 @@ export function WorkspaceCrud({ onChange, section, onSectionChange, access, canV
   const hasSpaceRight = (key: string) => canOrganization(access, key) || Object.keys(access?.spacePermissions ?? {}).some(spaceId => canSpace(access, spaceId, key))
   const hasProjectRight = (key: string) => canOrganization(access, key) || Object.keys(access?.spacePermissions ?? {}).some(spaceId => canSpace(access, spaceId, key)) || Object.values(access?.projectPermissions ?? {}).some(keys => keys.includes(key))
   const showSpaces = ['space.view', 'space.edit', 'space.delete', 'space.create', 'project.create', 'employee.view', 'employee.create', 'resource.pool.manage'].some(hasSpaceRight)
-    || ['project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete', 'access.manage'].some(hasProjectRight)
-  const showProjects = ['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete', 'access.manage'].some(key => hasProjectRight(key) || hasSpaceRight(key))
-  const showTasks = ['task.view', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'].some(hasProjectRight)
+    || ['project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete', 'access.manage'].some(hasProjectRight)
+  const showProjects = ['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete', 'access.manage'].some(key => hasProjectRight(key) || hasSpaceRight(key))
+  const showTasks = ['task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'].some(hasProjectRight)
   const showResources = hasSpaceRight('resource.pool.view') || hasSpaceRight('resource.pool.manage')
   const showAnalytics = hasSpaceRight('analytics.view') || hasProjectRight('analytics.view')
 
