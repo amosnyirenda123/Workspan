@@ -73,6 +73,23 @@ public class ScopedRoleProvisioner {
             if (role.getScope() == RoleScope.SPACE) grantMissing(role, spaceKeys);
         for (Role role : roles.findAllByNameStartingWith(PROJECT_ADMIN_PREFIX))
             if (role.getScope() == RoleScope.PROJECT) grantMissing(role, projectKeys);
+        syncRequiredViewPermissions();
+    }
+
+    /** Existing custom roles retain usable management screens when view prerequisites are introduced. */
+    private void syncRequiredViewPermissions() {
+        List<Permission> viewPermissions = permissions.findAllByKeyIn(List.of("gantt.view", "workload.view"));
+        for (Role role : roles.findAll()) {
+            java.util.Set<String> keys = rolePermissions.findAllByRoleId(role.getId()).stream()
+                    .map(link -> link.getPermission().getKey()).collect(java.util.stream.Collectors.toSet());
+            List<Permission> required = viewPermissions.stream().filter(permission -> {
+                String key = permission.getKey();
+                return key.equals("gantt.view")
+                        ? (keys.contains("gantt.schedule.manage") || keys.contains("gantt.dependencies.manage")) && !keys.contains(key)
+                        : keys.contains("workload.manage") && !keys.contains(key);
+            }).toList();
+            if (!required.isEmpty()) grantMissing(role, required);
+        }
     }
 
     private void grantMissing(Role role, List<Permission> selected) {

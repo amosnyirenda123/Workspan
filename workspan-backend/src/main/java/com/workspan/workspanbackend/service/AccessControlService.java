@@ -141,6 +141,10 @@ public class AccessControlService {
         List<String> distinctKeys = permissionKeys.stream().distinct().toList();
         if (distinctKeys.stream().anyMatch(key -> !allowedAtScope(role.getScope(), key)))
             throw badRequest("This permission cannot be used at the selected role scope");
+        if ((distinctKeys.contains("gantt.schedule.manage") || distinctKeys.contains("gantt.dependencies.manage")) && !distinctKeys.contains("gantt.view"))
+            throw badRequest("Gantt schedule and dependency permissions require gantt.view");
+        if (distinctKeys.contains("workload.manage") && !distinctKeys.contains("workload.view"))
+            throw badRequest("Workload management permission requires workload.view");
         List<Permission> selected = permissions.findAllByKeyIn(distinctKeys);
         if (selected.size() != distinctKeys.size()) throw badRequest("One or more permissions are not in the permission catalogue");
         Role saved = roles.saveAndFlush(role);

@@ -72,7 +72,8 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const canDelete = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.delete') }
   const canManageResources = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'project.resources.manage') }
   const showForm = projects.some(project => canProject(access, project.id, project.spaceId, 'task.create')) || (!!editingId && tasks.some(task => task.id === editingId && canEdit(task)))
-  const canViewList = projects.some(project => canProject(access, project.id, project.spaceId, 'task.view'))
+  const listPermissionKeys = ['task.view', 'task.edit', 'task.delete', 'project.resources.manage']
+  const canViewList = projects.some(project => listPermissionKeys.some(key => canProject(access, project.id, project.spaceId, key)))
   const canViewKanban = projects.some(project => canProject(access, project.id, project.spaceId, 'task.view.kanban'))
   const canViewScrum = projects.some(project => canProject(access, project.id, project.spaceId, 'task.view.scrum'))
   const taskViews: { id: TaskViewMode; label: string; enabled: boolean }[] = [
@@ -86,7 +87,8 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const canViewTask = (task: Task, mode = viewMode) => {
     const project = projects.find(item => item.id === task.projectId)
     if (!project) return false
-    return canProject(access, project.id, project.spaceId, mode === 'KANBAN' ? 'task.view.kanban' : mode === 'SCRUM' ? 'task.view.scrum' : 'task.view')
+    const keys = mode === 'KANBAN' ? ['task.view.kanban'] : mode === 'SCRUM' ? ['task.view.scrum'] : listPermissionKeys
+    return keys.some(key => canProject(access, project.id, project.spaceId, key))
   }
   const tasksForView = tasks.filter(task => canViewTask(task))
 
