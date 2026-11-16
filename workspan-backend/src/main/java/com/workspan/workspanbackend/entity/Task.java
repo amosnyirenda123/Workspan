@@ -24,6 +24,10 @@ public class Task extends BaseEntity {
     private LocalDate startDate;
     private LocalDate endDate;
 
+    /** Completion percentage (0-100) reported for the task. */
+    @Column(nullable = false, columnDefinition = "int default 0")
+    private int progress;
+
     public Task() {
     }
 
@@ -86,5 +90,13 @@ public class Task extends BaseEntity {
 
     public void setEndDate(LocalDate v) {
         endDate = v;
+    }
+
+    public int getProgress() {
+        return progress;
+    }
+
+    public void setProgress(int v) {
+        progress = v;
     }
 }

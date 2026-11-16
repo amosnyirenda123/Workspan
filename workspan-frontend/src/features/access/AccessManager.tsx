@@ -42,9 +42,8 @@ export function AccessManager() {
   }, [])
 
   const options = useMemo(() => scope === 'SPACE' ? context?.spaces ?? [] : scope === 'PROJECT' ? context?.projects ?? [] : [], [context, scope])
-  const visiblePermissions = permissions.filter(permission => scope === 'ORGANIZATION'
-    || (scope === 'SPACE' ? !['organization.view', 'space.create'].includes(permission.key)
-      : ['access.manage', 'analytics.view', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete'].includes(permission.key)))
+  // The backend catalogue says at which scopes each permission can be granted.
+  const visiblePermissions = permissions.filter(permission => permission.scopes.includes(scope))
   const permissionActions = [...new Set(visiblePermissions.map(permission => permission.action))]
   const permissionCategories = [...new Set(visiblePermissions.map(permission => permission.category))]
   const filteredPermissions = visiblePermissions.filter(permission => (permissionActionFilter === 'ALL' || permission.action === permissionActionFilter)

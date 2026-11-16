@@ -9,7 +9,8 @@ import { ProjectResourcesPanel } from './ProjectResourcesPanel'
 import type { EffectiveAccess } from '../../api/types'
 import { canProject, canSpace } from '../../api/accessPermissions'
 
-const emptyForm: ProjectRequest = { spaceId: '', name: '', description: '', startDate: '', endDate: '' }
+const emptyForm: ProjectRequest = { spaceId: '', name: '', description: '', baselineStart: '', baselineEnd: '' }
+const formatDate = (value: string | null) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('fr-FR') : null
 type ResourceDraft = { quantity: string; amount: string }
 
 export function ProjectsManager({ onChange, access }: { onChange: () => void; access: EffectiveAccess | null }) {
@@ -58,7 +59,8 @@ export function ProjectsManager({ onChange, access }: { onChange: () => void; ac
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError('')
     try {
-      const saved = editingId ? await projectService.update(editingId, form) : await projectService.create(form)
+      const payload: ProjectRequest = { ...form, baselineStart: form.baselineStart || null, baselineEnd: form.baselineEnd || null }
+      const saved = editingId ? await projectService.update(editingId, payload) : await projectService.create(payload)
       if (!editingId && addResources) {
         const selected = poolResources.filter(resource => resourceDrafts[resource.id])
         const results = await Promise.allSettled(selected.map(resource => {
@@ -73,13 +75,13 @@ export function ProjectsManager({ onChange, access }: { onChange: () => void; ac
         setResourcesProjectId(saved.id)
       }
       setProjects(current => editingId ? current.map(item => item.id === saved.id ? saved : item) : [...current, saved].sort((a, b) => a.name.localeCompare(b.name)))
-      setForm(emptyForm); setEditingId(null); setAddResources(false); setPoolResources([]); setResourceDrafts({}); onChange()
+      setForm(editingId ? emptyForm : { ...emptyForm, spaceId: form.spaceId }); setEditingId(null); setAddResources(false); setPoolResources([]); setResourceDrafts({}); onChange()
     } catch (cause) { setError(getApiErrorMessage(cause, 'Impossible d’enregistrer ce projet.')) }
     finally { setSaving(false) }
   }
 
   function edit(project: Project) {
-    setForm({ spaceId: project.spaceId, name: project.name, description: project.description ?? '', startDate: project.startDate ?? '', endDate: project.endDate ?? '' })
+    setForm({ spaceId: project.spaceId, name: project.name, description: project.description ?? '', baselineStart: project.baselineStart ?? '', baselineEnd: project.baselineEnd ?? '' })
     setEditingId(project.id); setResourcesProjectId(canManageResources(project) ? project.id : null); setAddResources(false); setError('')
   }
 
@@ -116,17 +118,18 @@ export function ProjectsManager({ onChange, access }: { onChange: () => void; ac
         <div className="form-field full-width"><label htmlFor="project-space">Espace <span>*</span></label><select id="project-space" required value={form.spaceId} onChange={event => { setForm({ ...form, spaceId: event.target.value }); setAddResources(false) }}><option value="">Choisir un espace</option>{assignableSpaces.map(space => <option key={space.id} value={space.id}>{space.name}</option>)}</select></div>
         <div className="form-field full-width"><label htmlFor="project-name">Nom du projet <span>*</span></label><input id="project-name" required maxLength={120} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></div>
         <div className="form-field full-width"><label htmlFor="project-description">Description</label><textarea id="project-description" maxLength={10000} rows={3} value={form.description ?? ''} onChange={event => setForm({ ...form, description: event.target.value })} /></div>
-        <div className="form-field"><label htmlFor="project-start">Date de début</label><input id="project-start" type="date" value={form.startDate ?? ''} onChange={event => setForm({ ...form, startDate: event.target.value })} /></div>
-        <div className="form-field"><label htmlFor="project-end">Date de fin</label><input id="project-end" type="date" value={form.endDate ?? ''} onChange={event => setForm({ ...form, endDate: event.target.value })} /></div>
+        <div className="form-field"><label htmlFor="project-start">Début planifié</label><input id="project-start" type="date" value={form.baselineStart ?? ''} onChange={event => setForm({ ...form, baselineStart: event.target.value })} /></div>
+        <div className="form-field"><label htmlFor="project-end">Fin planifiée</label><input id="project-end" type="date" min={form.baselineStart || undefined} value={form.baselineEnd ?? ''} onChange={event => setForm({ ...form, baselineEnd: event.target.value })} /></div>
+        <p className="field-hint full-width">Les dates réelles du projet sont calculées automatiquement à partir de ses tâches.</p>
       </div>
       {!editingId && canSpace(access, form.spaceId, 'project.resources.manage') && <div className="project-create-resources"><label className="project-resource-toggle"><input type="checkbox" checked={addResources} onChange={event => setAddResources(event.target.checked)} /><span><strong>Ajouter des ressources à la création</strong><small>Vous pourrez choisir des employés, équipements et budgets du pool de cet espace.</small></span></label>
         {addResources && <div className="project-create-resource-list">{resourcesLoading ? <p className="field-hint">Chargement du pool…</p> : poolResources.length ? poolResources.map(resource => { const unavailable = resource.status !== 'AVAILABLE' || resource.type === 'EQUIPMENT' && !(resource.availableQuantity ?? 0) || resource.type === 'BUDGET' && !(resource.availableAmount ?? 0); return <label className={`project-create-resource ${unavailable ? 'unavailable' : ''}`} key={resource.id}><input type="checkbox" disabled={unavailable} checked={!!resourceDrafts[resource.id]} onChange={event => setResourceDrafts(current => { const next = { ...current }; if (event.target.checked) next[resource.id] = { quantity: '1', amount: '' }; else delete next[resource.id]; return next })} /><span className="project-create-resource-name"><strong>{resource.name}</strong><small>{resource.type === 'HUMAN' ? `Employé${resource.jobTitle ? ` · ${resource.jobTitle}` : ''}` : resource.type === 'EQUIPMENT' ? `Équipement · ${resource.availableQuantity ?? 0} unité(s) disponibles` : `Budget · ${resource.availableAmount ?? 0} ${resource.currency ?? ''} disponibles`}{unavailable ? ' · Indisponible' : ''}</small></span>{resourceDrafts[resource.id] && resource.type === 'EQUIPMENT' && <input className="resource-allocation-input" aria-label={`Unités pour ${resource.name}`} type="number" min="1" max={resource.availableQuantity ?? undefined} step="1" value={resourceDrafts[resource.id].quantity} onChange={event => setResourceDrafts(current => ({ ...current, [resource.id]: { ...current[resource.id], quantity: event.target.value } }))} />}{resourceDrafts[resource.id] && resource.type === 'BUDGET' && <input className="resource-allocation-input" aria-label={`Montant pour ${resource.name}`} type="number" min="0.01" max={resource.availableAmount ?? undefined} step="0.01" value={resourceDrafts[resource.id].amount} onChange={event => setResourceDrafts(current => ({ ...current, [resource.id]: { ...current[resource.id], amount: event.target.value } }))} />}</label>}) : <p className="field-hint">{form.spaceId ? 'Aucune ressource disponible dans le pool de cet espace.' : 'Choisissez un espace pour afficher son pool.'}</p>}</div>}
       </div>}
       {error && <div className="alert form-alert" role="alert">{error}</div>}{spaces.length === 0 && <p className="field-hint">Créez un espace avant d’ajouter un projet.</p>}
-      <div className="form-actions"><button className="primary-button" disabled={saving || spaces.length === 0 || (!editingId && !canCreate) || resourcesLoading || invalidResourceDraft}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer le projet'}</button>{editingId && <button type="button" className="secondary-button" onClick={() => { setEditingId(null); setResourcesProjectId(null); setForm(emptyForm) }}>Annuler</button>}</div></form>
+      <div className="form-actions"><button className="primary-button" aria-busy={saving} disabled={saving || spaces.length === 0 || (!editingId && !canCreate) || resourcesLoading || invalidResourceDraft}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer le projet'}</button>{editingId && <button type="button" className="secondary-button" onClick={() => { setEditingId(null); setResourcesProjectId(null); setForm(emptyForm) }}>Annuler</button>}</div></form>
     </section>}
     <section className="crud-list-panel" aria-live="polite">
-      {loading ? <div className="empty-state">Chargement des projets…</div> : projects.length ? projects.map(project => <article className="crud-row" key={project.id}><div className="crud-symbol blue">P</div><div className="crud-row-main"><strong>{project.name}</strong><small>{spaceName(project.spaceId)}{project.startDate ? ` · ${project.startDate}` : ''}</small></div><div className="crud-actions">{canEdit(project) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(project)}>Modifier</button>}{canManageResources(project) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesProjectId(current => current === project.id ? null : project.id)}>Ressources</button>}{canDelete(project) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(project)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucun projet</strong><p>Choisissez un espace pour créer votre premier projet.</p></div>}
+      {loading ? <div className="empty-state">Chargement des projets…</div> : projects.length ? projects.map(project => <article className="crud-row" key={project.id}><div className="crud-symbol blue">P</div><div className="crud-row-main"><strong>{project.name}</strong><small>{spaceName(project.spaceId)}{project.baselineStart || project.baselineEnd ? ` · Planifié : ${formatDate(project.baselineStart) ?? '?'} → ${formatDate(project.baselineEnd) ?? '?'}` : ''}{project.startDate ? ` · Réel : ${formatDate(project.startDate)} → ${formatDate(project.endDate) ?? 'en cours'}` : ''}</small></div><div className="crud-actions">{canEdit(project) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(project)}>Modifier</button>}{canManageResources(project) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesProjectId(current => current === project.id ? null : project.id)}>Ressources</button>}{canDelete(project) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(project)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucun projet</strong><p>Choisissez un espace pour créer votre premier projet.</p></div>}
     </section>
     {resourcesProjectId && projects.find(project => project.id === resourcesProjectId && canManageResources(project)) && <ProjectResourcesPanel key={resourcesProjectId} project={projects.find(project => project.id === resourcesProjectId)!} onClose={() => setResourcesProjectId(null)} />}
   </div>

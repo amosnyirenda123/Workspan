@@ -13,4 +13,6 @@ public interface TaskResourceAllocationRepository extends JpaRepository<TaskReso
     Optional<TaskResourceAllocation> findByTaskIdAndProjectResourceAllocationId(UUID taskId, UUID allocationId);
     boolean existsByProjectResourceAllocationId(UUID allocationId);
     void deleteAllByTaskId(UUID taskId);
+    List<TaskResourceAllocation> findAllByProjectResourceAllocationResourceId(UUID resourceId);
+    List<TaskResourceAllocation> findAllByProjectResourceAllocationResourceSpaceId(UUID spaceId);
 }

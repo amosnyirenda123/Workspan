@@ -67,6 +67,8 @@ function App() {
   const canUseResources = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage'])
   const canUseAccessManagement = hasWorkspacePermission(['access.manage'])
   const canUseAnalytics = hasWorkspacePermission(['analytics.view'])
+  const canUseGantt = hasWorkspacePermission(['gantt.view'])
+  const canUseWorkload = hasWorkspacePermission(['workload.view'])
   const canViewAnalyticsEmployees = hasWorkspacePermission(['employee.view', 'employee.manage_accounts'])
   const canViewAnalyticsPools = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage', 'project.resources.manage'])
 
@@ -191,7 +193,7 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
+  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', gantt: 'Planification (Gantt)', workload: 'Charge des ressources', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
   const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : isOrganizationsPage ? workspaceTitles[workspaceSection] : 'Organisations'
 
   async function logout() {
@@ -222,6 +224,8 @@ function App() {
         {canUseSpaces && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'spaces' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('spaces') }}><span>▦</span> Espaces</a>}
         {canUseProjects && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'projects' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('projects') }}><span>◈</span> Projets</a>}
         {canUseTasks && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'tasks' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('tasks') }}><span>☑</span> Tâches</a>}
+        {canUseGantt && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'gantt' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('gantt') }}><span>▤</span> Planification (Gantt)</a>}
+        {canUseWorkload && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'workload' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('workload') }}><span>▦</span> Charge des ressources</a>}
         {canUseEmployeeSection && <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>}
         {canUseResources && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'resources' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('resources') }}><span>⬡</span> Ressources</a>}
         {canUseAccessManagement && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'access' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('access') }}><span>⚿</span> Rôles et permissions</a>}

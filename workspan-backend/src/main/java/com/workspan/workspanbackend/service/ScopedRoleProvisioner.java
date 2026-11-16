@@ -9,6 +9,20 @@ import java.util.UUID;
 
 @Component
 public class ScopedRoleProvisioner {
+    public static final String SPACE_ADMIN_PREFIX = "SPACE_ADMIN - ";
+    public static final String PROJECT_ADMIN_PREFIX = "PROJECT_ADMIN - ";
+
+    /** Permissions granted to the creator of a space. */
+    public static final List<String> SPACE_ADMIN_KEYS = List.of("space.view", "space.edit", "space.delete", "employee.view", "employee.create", "employee.manage_accounts",
+            "resource.pool.view", "resource.pool.manage", "analytics.view", "project.view", "project.create", "project.edit", "project.delete",
+            "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete",
+            "gantt.view", "gantt.dependencies.manage", "gantt.schedule.manage", "workload.view", "workload.manage", "access.manage");
+
+    /** Permissions granted to the creator of a project. */
+    public static final List<String> PROJECT_ADMIN_KEYS = List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "analytics.view",
+            "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete",
+            "gantt.view", "gantt.dependencies.manage", "gantt.schedule.manage", "workload.view", "workload.manage", "access.manage");
+
     private final RoleRepository roles;
     private final PermissionRepository permissions;
     private final RolePermissionRepository rolePermissions;
@@ -25,11 +39,9 @@ public class ScopedRoleProvisioner {
 
     @Transactional
     public void assignSpaceOwner(UUID organizationId, UUID userId, Space space) {
-        String roleName = "SPACE_ADMIN - " + space.getId().toString().substring(0, 8);
+        String roleName = SPACE_ADMIN_PREFIX + space.getId().toString().substring(0, 8);
         Role role = ensureRole(space.getOrganization(), roleName, RoleScope.SPACE, space, null,
-                List.of("space.view", "space.edit", "space.delete", "employee.view", "employee.create", "employee.manage_accounts",
-                        "resource.pool.view", "resource.pool.manage", "analytics.view", "project.view", "project.create", "project.edit", "project.delete",
-                        "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "access.manage"));
+                SPACE_ADMIN_KEYS);
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (spaceAssignments.findByUserIdAndRoleIdAndSpaceId(userId, role.getId(), space.getId()).isEmpty()) {
             SpaceRoleAssignment assignment = new SpaceRoleAssignment(); assignment.setUser(user); assignment.setRole(role); assignment.setSpace(space);
@@ -39,14 +51,35 @@ public class ScopedRoleProvisioner {
 
     @Transactional
     public void assignProjectOwner(UUID organizationId, UUID userId, Project project) {
-        String roleName = "PROJECT_ADMIN - " + project.getId().toString().substring(0, 8);
+        String roleName = PROJECT_ADMIN_PREFIX + project.getId().toString().substring(0, 8);
         Role role = ensureRole(project.getSpace().getOrganization(), roleName, RoleScope.PROJECT, null, project,
-                List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "analytics.view",
-                        "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "access.manage"));
+                PROJECT_ADMIN_KEYS);
         UserAccount user = users.findByIdAndOrganizationId(userId, organizationId).orElseThrow();
         if (projectAssignments.findByUserIdAndRoleIdAndProjectId(userId, role.getId(), project.getId()).isEmpty()) {
             ProjectRoleAssignment assignment = new ProjectRoleAssignment(); assignment.setUser(user); assignment.setRole(role); assignment.setProject(project);
             projectAssignments.save(assignment);
+        }
+    }
+
+    /**
+     * Brings built-in scoped admin roles up to date with the current catalogue (e.g. when new permissions such as
+     * the Gantt ones are introduced), so existing space/project owners keep full control of their scope.
+     */
+    @Transactional
+    public void syncBuiltInScopedRoles() {
+        List<Permission> spaceKeys = permissions.findAllByKeyIn(SPACE_ADMIN_KEYS);
+        List<Permission> projectKeys = permissions.findAllByKeyIn(PROJECT_ADMIN_KEYS);
+        for (Role role : roles.findAllByNameStartingWith(SPACE_ADMIN_PREFIX))
+            if (role.getScope() == RoleScope.SPACE) grantMissing(role, spaceKeys);
+        for (Role role : roles.findAllByNameStartingWith(PROJECT_ADMIN_PREFIX))
+            if (role.getScope() == RoleScope.PROJECT) grantMissing(role, projectKeys);
+    }
+
+    private void grantMissing(Role role, List<Permission> selected) {
+        java.util.Set<UUID> currentPermissionIds = rolePermissions.findAllByRoleId(role.getId()).stream()
+                .map(link -> link.getPermission().getId()).collect(java.util.stream.Collectors.toSet());
+        for (Permission permission : selected) if (!currentPermissionIds.contains(permission.getId())) {
+            RolePermission link = new RolePermission(); link.setRole(role); link.setPermission(permission); rolePermissions.save(link);
         }
     }
 

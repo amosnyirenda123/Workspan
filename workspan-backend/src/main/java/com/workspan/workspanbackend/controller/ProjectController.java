@@ -27,12 +27,12 @@ public class ProjectController {
     @GetMapping @Operation(summary = "Lister les projets de l’organisation")
     public List<ProjectResponse> findAll(HttpSession session) {
         UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
-        return projects.findAll(organizationId).stream().filter(project -> java.util.List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "access.manage", "analytics.view")
+        return projects.findAll(organizationId).stream().filter(project -> java.util.List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "gantt.view", "workload.view", "access.manage", "analytics.view")
                 .stream().anyMatch(key -> access.hasProjectPermission(userId, organizationId, project.spaceId(), project.id(), key))).toList();
     }
 
     @GetMapping("/{id}") @Operation(summary = "Lire un projet")
-    public ProjectResponse findById(@PathVariable UUID id, HttpSession session) { return projects.findById(id, access.requireProjectAnyPermission(session, id, java.util.List.of("project.view", "task.view", "task.view.kanban", "task.view.scrum", "project.edit", "project.delete"))); }
+    public ProjectResponse findById(@PathVariable UUID id, HttpSession session) { return projects.findById(id, access.requireProjectAnyPermission(session, id, java.util.List.of("project.view", "task.view", "task.view.kanban", "task.view.scrum", "project.edit", "project.delete", "gantt.view", "workload.view"))); }
 
     @PostMapping @ResponseStatus(HttpStatus.CREATED) @Operation(summary = "Créer un projet")
     public ProjectResponse create(@Valid @RequestBody ProjectRequest request, HttpSession session) { return projects.create(access.requireSpacePermission(session, request.spaceId(), "project.create"), access.userId(session), request); }

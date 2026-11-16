@@ -15,5 +15,6 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
     List<Role> findAllByOrganizationIdAndScopeAndScopeSpaceIdOrderByNameAsc(UUID organizationId, RoleScope scope, UUID spaceId);
     List<Role> findAllByOrganizationIdAndScopeAndScopeProjectIdOrderByNameAsc(UUID organizationId, RoleScope scope, UUID projectId);
     Optional<Role> findByOrganizationIdAndNameAndScopeAndScopeSpaceId(UUID organizationId, String name, RoleScope scope, UUID spaceId);
+    List<Role> findAllByNameStartingWith(String prefix);
     Optional<Role> findByOrganizationIdAndNameAndScopeAndScopeProjectId(UUID organizationId, String name, RoleScope scope, UUID projectId);
 }
