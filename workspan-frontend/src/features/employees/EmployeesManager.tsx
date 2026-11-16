@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { employeeService } from '../../api/employeeService'
 import { getApiErrorMessage } from '../../api/http'
 import { spaceService } from '../../api/spaceService'
-import type { CredentialBatchResponse, CredentialDeliveryResult, Employee, EmployeeImportRowResult, Space } from '../../api/types'
+import type { AccessRole, CredentialBatchResponse, CredentialDeliveryResult, Employee, EmployeeImportRowResult, Space } from '../../api/types'
 import { downloadEmployeeTemplate, parseEmployeeFile, type EmployeeImportPreviewRow } from './employeeImport'
 import { accessService } from '../../api/accessService'
 import { canOrganization, canSpace } from '../../api/accessPermissions'
@@ -30,6 +30,10 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
   const [credentialSummary, setCredentialSummary] = useState('')
   const [credentialResults, setCredentialResults] = useState<CredentialDeliveryResult[]>([])
   const [access, setAccess] = useState<EffectiveAccess | null>(null)
+  const [inviteEmployeeId, setInviteEmployeeId] = useState<string | null>(null)
+  const [inviteRoles, setInviteRoles] = useState<AccessRole[]>([])
+  const [inviteRoleId, setInviteRoleId] = useState('')
+  const [inviteLoading, setInviteLoading] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -133,6 +137,10 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
       }
     }
     if (!target.email) return
+    if (!target.hasAccount) {
+      await beginEmployeeInvite(target)
+      return
+    }
     if (target.credentialEmailSentAt && !window.confirm(`Regenerer le mot de passe temporaire et l'envoyer a ${target.email} ? Son mot de passe actuel cessera de fonctionner.`)) return
     setCredentialBusy(employee.id)
     setCredentialSummary('')
@@ -149,11 +157,53 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
     }
   }
 
+  async function beginEmployeeInvite(employee: Employee) {
+    if (credentialBusy || inviteLoading) return
+    setCredentialSummary('')
+    setCredentialResults([])
+    setInviteEmployeeId(employee.id)
+    setInviteRoles([])
+    setInviteRoleId('')
+    setInviteLoading(true)
+    try {
+      const roles = await employeeService.inviteRoles(employee.id)
+      setInviteRoles(roles)
+      setInviteRoleId(roles[0]?.id ?? '')
+      if (roles.length === 0) setCredentialSummary('Aucun role attribuable. Il faut le droit de gerer les roles et permissions sur l organisation ou cet espace.')
+    } catch (cause) {
+      setCredentialSummary(getApiErrorMessage(cause, 'Impossible de charger les rôles attribuables.'))
+      setInviteEmployeeId(null)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
+
+  async function submitEmployeeInvite(employee: Employee) {
+    const role = inviteRoles.find(item => item.id === inviteRoleId)
+    if (!role || credentialBusy) return
+    setCredentialBusy(employee.id)
+    setCredentialSummary('')
+    setCredentialResults([])
+    try {
+      const result = await employeeService.invite(employee.id, role.id, role.scope as 'ORGANIZATION' | 'SPACE')
+      setCredentialSummary(`Invitation envoyee a ${result.email} avec le role "${role.name}".`)
+      setEmployees(current => current.map(item => item.id === employee.id ? { ...item, hasAccount: true, credentialEmailSentAt: result.sentAt } : item))
+      setInviteEmployeeId(null)
+      setInviteRoles([])
+      setInviteRoleId('')
+      onChange()
+    } catch (cause) {
+      setCredentialSummary(getApiErrorMessage(cause, `Impossible d'inviter ${employee.name}.`))
+    } finally {
+      setCredentialBusy(null)
+    }
+  }
+
   async function sendAllCredentials() {
     if (credentialBusy || !employees.length) return
-    const pending = employees.filter(employee => !employee.credentialEmailSentAt).length
+    const pending = employees.filter(employee => employee.hasAccount && !employee.credentialEmailSentAt).length
     if (pending === 0) {
-      setCredentialSummary('Tous les employes ont deja recu leurs identifiants. Utilisez le bouton individuel pour regenerer un mot de passe.')
+      setCredentialSummary('Aucun compte existant a traiter. Invitez les nouveaux employes individuellement en choisissant leur role d acces.')
       return
     }
     if (!window.confirm(`Envoyer les identifiants temporaires aux ${pending} employe(s) qui ne les ont pas encore recus ?`)) return
@@ -192,12 +242,12 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
     </div>
     <div className="crud-layout">
       {canCreateAny && (mode === 'single' ? <section className="form-panel crud-form-panel">
-        <div className="form-panel-heading"><div className="form-icon">E</div><div><h2>Nouvel employe</h2><p>Ajoutez un membre a un espace de votre organisation.</p></div></div>
+        <div className="form-panel-heading"><div className="form-icon">E</div><div><h2>Nouvel employe</h2><p>L'intitule decrit le poste; le role d'acces sera choisi au moment d'inviter l'employe.</p></div></div>
         <form className="organization-form" onSubmit={submit}>
           <div className="form-grid">
             <div className="form-field full-width"><label htmlFor="employee-name">Nom complet <span>*</span></label><input id="employee-name" required maxLength={120} autoComplete="name" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></div>
             <div className="form-field full-width"><label htmlFor="employee-email">E-mail <span>*</span></label><input id="employee-email" type="email" required maxLength={254} autoComplete="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></div>
-            <div className="form-field full-width"><label htmlFor="employee-title">Fonction</label><input id="employee-title" maxLength={100} value={form.jobTitle} onChange={event => setForm({ ...form, jobTitle: event.target.value })} placeholder="Ex. Chef de projet" /></div>
+            <div className="form-field full-width"><label htmlFor="employee-title">Intitulé du poste</label><input id="employee-title" maxLength={100} value={form.jobTitle} onChange={event => setForm({ ...form, jobTitle: event.target.value })} placeholder="Ex. Chef de projet" /></div>
             <div className="form-field full-width"><label htmlFor="employee-space">Espace <span>*</span></label><select id="employee-space" required value={form.spaceId} onChange={event => setForm({ ...form, spaceId: event.target.value })}><option value="">Choisir un espace</option>{spaces.map(space => <option key={space.id} value={space.id}>{space.name}</option>)}</select></div>
           </div>
           {error && <div className="alert form-alert" role="alert">{error}</div>}
@@ -222,10 +272,10 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
         {importReport.length > 0 && <div className="employee-import-report" aria-live="polite">{importReport.map(row => <div key={`${row.rowNumber}-${row.status}`}><strong>Ligne {row.rowNumber} - {row.status}</strong><span>{row.message}</span></div>)}</div>}
       </section>)}
       <section className="crud-list-panel" aria-live="polite">
-        <div className="employee-list-heading"><div><strong>Employes de l'organisation</strong><small>Le premier envoi cree leur compte utilisateur.</small></div><button type="button" className="secondary-button" onClick={() => void sendAllCredentials()} disabled={!canSendAll || !!credentialBusy || loading || !employees.length}>{credentialBusy === 'all' ? 'Envoi...' : 'Envoyer a tous'}</button></div>
+        <div className="employee-list-heading"><div><strong>Employes de l'organisation</strong><small>Le premier envoi cree leur compte utilisateur.</small>{access && !canSendAll && <small>L’envoi groupé concerne toute l’organisation et nécessite le droit de gérer les comptes à cette portée.</small>}</div><button type="button" className="secondary-button" onClick={() => void sendAllCredentials()} disabled={!canSendAll || !!credentialBusy || loading || !employees.length}>{credentialBusy === 'all' ? 'Envoi...' : 'Envoyer à tous (organisation)'}</button></div>
         {credentialSummary && <div className="credential-summary" role="status">{credentialSummary}</div>}
         {credentialResults.some(row => row.status === 'FAILED') && <div className="credential-failures">{credentialResults.filter(row => row.status === 'FAILED').map(row => <p key={row.employeeId}>{row.email || 'E-mail manquant'}: {row.message}</p>)}</div>}
-        {loading ? <div className="empty-state">Chargement des employes...</div> : employees.length ? employees.map(employee => <article className="crud-row employee-row" key={employee.id}><div className="crud-symbol violet">{employee.name.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{employee.name}</strong><small>{employee.email ?? 'E-mail manquant'} - {employee.jobTitle ? `${employee.jobTitle} - ` : ''}{employee.spaceName}</small><small>{employee.credentialEmailSentAt ? `Identifiants envoyes le ${new Date(employee.credentialEmailSentAt).toLocaleDateString('fr-FR')}` : employee.hasAccount ? 'Compte cree, identifiants a envoyer' : 'Aucun compte utilisateur'}</small></div>{canSpace(access, employee.spaceId, 'employee.manage_accounts') && <button type="button" className="secondary-button employee-send-button" onClick={() => void sendEmployeeCredentials(employee)} disabled={!!credentialBusy}>{credentialBusy === employee.id ? 'Envoi...' : !employee.email ? 'Ajouter e-mail et envoyer' : employee.credentialEmailSentAt ? 'Reinitialiser et renvoyer' : 'Envoyer les identifiants'}</button>}</article>) : <div className="empty-state"><strong>Aucun employe</strong><p>Les employes crees apparaitront ici.</p></div>}
+        {loading ? <div className="empty-state">Chargement des employes...</div> : employees.length ? employees.map(employee => <article className="crud-row employee-row" key={employee.id}><div className="crud-symbol violet">{employee.name.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{employee.name}</strong><small>{employee.email ?? 'E-mail manquant'} - {employee.jobTitle ? `${employee.jobTitle} - ` : ''}{employee.spaceName}</small><small>{employee.credentialEmailSentAt ? `Identifiants envoyes le ${new Date(employee.credentialEmailSentAt).toLocaleDateString('fr-FR')}` : employee.hasAccount ? 'Compte cree, identifiants a envoyer' : 'Aucun compte utilisateur'}</small></div>{canSpace(access, employee.spaceId, 'employee.manage_accounts') && <button type="button" className="secondary-button employee-send-button" onClick={() => void sendEmployeeCredentials(employee)} disabled={!!credentialBusy || inviteLoading}>{credentialBusy === employee.id ? employee.hasAccount ? 'Envoi...' : 'Invitation...' : !employee.hasAccount ? 'Choisir un rôle et inviter' : employee.credentialEmailSentAt ? 'Réinitialiser et renvoyer' : 'Renvoyer les identifiants'}</button>}{inviteEmployeeId === employee.id && <div className="employee-invite-controls"><label htmlFor={`employee-role-${employee.id}`}>Rôle d’accès</label><select id={`employee-role-${employee.id}`} value={inviteRoleId} onChange={event => setInviteRoleId(event.target.value)} disabled={inviteLoading || !inviteRoles.length}><option value="">{inviteLoading ? 'Chargement des rôles…' : 'Choisir un rôle'}</option>{inviteRoles.map(role => <option key={role.id} value={role.id}>{role.name} · {role.scope === 'ORGANIZATION' ? 'Organisation entière' : 'Cet espace'}</option>)}</select>{inviteRoles.find(role => role.id === inviteRoleId)?.scope === 'ORGANIZATION' && <small>Ce rôle accorde ses permissions dans toute l’organisation.</small>}<div><button type="button" className="primary-button" disabled={inviteLoading || !!credentialBusy || !inviteRoleId} onClick={() => void submitEmployeeInvite(employee)}>{credentialBusy === employee.id ? 'Envoi...' : 'Inviter avec ce rôle'}</button><button type="button" className="secondary-button" onClick={() => { setInviteEmployeeId(null); setInviteRoleId(''); setInviteRoles([]) }}>Annuler</button></div></div>}</article>) : <div className="empty-state"><strong>Aucun employe</strong><p>Les employes crees apparaitront ici.</p></div>}
       </section>
     </div>
   </>

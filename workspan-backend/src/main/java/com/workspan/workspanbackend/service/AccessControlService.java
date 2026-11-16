@@ -96,8 +96,10 @@ public class AccessControlService {
     }
 
     @Transactional
-    public RoleAssignmentResponse assign(UUID organizationId, RoleScope scope, UUID contextId, RoleAssignmentRequest request) {
+    public RoleAssignmentResponse assign(UUID organizationId, RoleScope scope, UUID contextId, UUID actorId, RoleAssignmentRequest request) {
         validateContext(organizationId, scope, contextId);
+        if (actorId.equals(request.userId()))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot assign a role to your own account");
         UserAccount user = users.findByIdAndOrganizationId(request.userId(), organizationId)
                 .filter(item -> "ACTIVE".equals(item.getStatus())).orElseThrow(() -> notFound("Active organization member not found"));
         Role role = roles.findById(request.roleId()).filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope && sameContext(item, scope, contextId))

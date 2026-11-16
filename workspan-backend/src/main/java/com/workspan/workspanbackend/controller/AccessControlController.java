@@ -93,7 +93,7 @@ public class AccessControlController {
     public RoleAssignmentResponse assign(@RequestParam("scope") RoleScope scope, @RequestParam("contextId") UUID contextId,
             @Valid @RequestBody RoleAssignmentRequest request, HttpSession session) {
         UUID orgId = access.organizationId(session); access.requireScopeManager(session, scope, contextId);
-        return accessControl.assign(orgId, scope, contextId, request);
+        return accessControl.assign(orgId, scope, contextId, access.userId(session), request);
     }
 
     @DeleteMapping("/assignments") @ResponseStatus(HttpStatus.NO_CONTENT)
