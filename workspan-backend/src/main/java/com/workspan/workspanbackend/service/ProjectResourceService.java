@@ -44,7 +44,7 @@ public class ProjectResourceService {
     @Transactional
     public ProjectResourceAllocationResponse assign(UUID projectId, UUID organizationId, ProjectResourceAllocationRequest request) {
         Project project = requireProject(projectId, organizationId);
-        if (project.getEndDate() != null && project.getEndDate().isBefore(LocalDate.now()))
+        if (ScheduleDates.projectEnd(project) != null && ScheduleDates.projectEnd(project).isBefore(LocalDate.now()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Resources cannot be assigned to a project that has ended");
         Resource resource = resources.findForAllocation(request.resourceId(), organizationId)
                 .orElseThrow(() -> notFound("Resource not found"));
@@ -58,9 +58,8 @@ public class ProjectResourceService {
         ProjectResourceAllocation allocation = new ProjectResourceAllocation();
         allocation.setProject(project); allocation.setResource(resource);
         if (resource instanceof HumanResource) {
-            if (request.quantity() != null || request.amount() != null) throw badRequest("An employee is assigned as one person");
-            if (allocations.findAllByResourceId(resource.getId()).stream().anyMatch(existing -> overlaps(window(project), window(existing.getProject()))))
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "This employee is already allocated to an overlapping project");
+            // An employee can belong to several projects at once; their workload is analysed across all of them.
+            if (request.quantity() != null || request.amount() != null) throw badRequest("An employee is added to a project pool as one person");
         } else if (resource instanceof EquipmentResource equipment) {
             if (request.quantity() == null || request.amount() != null) throw badRequest("Choose the number of equipment units to allocate");
             long alreadyAllocated = allocations.findAllByResourceId(resource.getId()).stream()
@@ -91,7 +90,7 @@ public class ProjectResourceService {
         if (taskAllocations.existsByProjectResourceAllocationId(allocation.getId()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove this resource from its tasks before removing it from the project");
         if (allocation.getResource() instanceof BudgetResource budget) {
-            if (project.getEndDate() != null && project.getEndDate().isBefore(LocalDate.now()))
+            if (ScheduleDates.projectEnd(project) != null && ScheduleDates.projectEnd(project).isBefore(LocalDate.now()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Budget cannot be withdrawn after the project has ended");
         }
         allocations.delete(allocation);
@@ -107,7 +106,7 @@ public class ProjectResourceService {
         if (resource instanceof EquipmentResource equipment)
             availableQuantity = Math.max(0, equipment.getQuantity() - allocations.sumAllocatedQuantity(resource.getId()).intValue());
         else if (resource instanceof HumanResource)
-            availableQuantity = allocations.findAllByResourceId(resource.getId()).stream().anyMatch(this::isProjectAllocationActive) ? 0 : 1;
+            availableQuantity = 1; // employees can join several projects; overload is reported by the workload analysis
         BigDecimal amount = resource instanceof BudgetResource budget ? budget.getAmount() : null;
         BigDecimal consumed = resource instanceof BudgetResource budget ? budget.getConsumed() : null;
         BigDecimal remaining = resource instanceof BudgetResource budget ? budget.getRemaining() : null;
@@ -145,21 +144,19 @@ public class ProjectResourceService {
             freeQuantity = Math.max(0, (allocation.getAllocatedQuantity() == null ? 0 : allocation.getAllocatedQuantity()) - (taskQuantity == null ? 0 : taskQuantity));
         BigDecimal freeAmount = resource instanceof BudgetResource ? (allocation.getAllocatedAmount() == null ? BigDecimal.ZERO : allocation.getAllocatedAmount()).subtract(taskAmount == null ? BigDecimal.ZERO : taskAmount).max(BigDecimal.ZERO) : null;
         Project project = allocation.getProject(); LocalDate today = LocalDate.now();
-        boolean active = (project.getStartDate() == null || !today.isBefore(project.getStartDate()))
-                && (project.getEndDate() == null || !today.isAfter(project.getEndDate()));
-        LocalDate availableFrom = project.getEndDate() == null ? null : project.getEndDate().plusDays(1);
+        boolean active = (ScheduleDates.projectStart(project) == null || !today.isBefore(ScheduleDates.projectStart(project)))
+                && (ScheduleDates.projectEnd(project) == null || !today.isAfter(ScheduleDates.projectEnd(project)));
+        LocalDate availableFrom = ScheduleDates.projectEnd(project) == null ? null : ScheduleDates.projectEnd(project).plusDays(1);
         return new ProjectResourceAllocationResponse(resource.getId(), resource.getName(), resource.getType(),
                 allocation.getAllocatedQuantity(), allocation.getAllocatedAmount(), currency, allocation.getAllocatedAt(),
                 activeTaskCount, scheduledTaskCount, taskQuantity, scheduledTaskQuantity, taskAmount, scheduledTaskAmount,
-                freeQuantity, freeAmount, project.getStartDate(), project.getEndDate(), availableFrom, active);
+                freeQuantity, freeAmount, ScheduleDates.projectStart(project), ScheduleDates.projectEnd(project), availableFrom, active);
     }
     private boolean isTaskAllocationActive(TaskResourceAllocation allocation) {
         Task task = allocation.getTask(); Project project = task.getProject(); LocalDate today = LocalDate.now();
-        if (task.getStatus() == TaskStatus.DONE || project.getEndDate() != null && today.isAfter(project.getEndDate())) return false;
-        LocalDate start = task.getStartDate() != null ? task.getStartDate() : project.getStartDate();
-        LocalDate end = task.getEndDate() != null ? task.getEndDate() : project.getEndDate();
-        if (project.getStartDate() != null && (start == null || start.isBefore(project.getStartDate()))) start = project.getStartDate();
-        if (project.getEndDate() != null && (end == null || end.isAfter(project.getEndDate()))) end = project.getEndDate();
+        if (task.getStatus() == TaskStatus.DONE) return false;
+        LocalDate start = ScheduleDates.taskStart(task) != null ? ScheduleDates.taskStart(task) : ScheduleDates.projectStart(project);
+        LocalDate end = ScheduleDates.taskEnd(task) != null ? ScheduleDates.taskEnd(task) : ScheduleDates.projectEnd(project);
         return (start == null || !today.isBefore(start)) && (end == null || !today.isAfter(end));
     }
     private boolean isTaskAllocationScheduled(TaskResourceAllocation allocation) {
@@ -169,18 +166,11 @@ public class ProjectResourceService {
     }
     private Window taskWindow(TaskResourceAllocation allocation) {
         Task task = allocation.getTask(); Project project = task.getProject();
-        LocalDate start = task.getStartDate() != null ? task.getStartDate() : project.getStartDate();
-        LocalDate end = task.getEndDate() != null ? task.getEndDate() : project.getEndDate();
-        if (project.getStartDate() != null && (start == null || start.isBefore(project.getStartDate()))) start = project.getStartDate();
-        if (project.getEndDate() != null && (end == null || end.isAfter(project.getEndDate()))) end = project.getEndDate();
+        LocalDate start = ScheduleDates.taskStart(task) != null ? ScheduleDates.taskStart(task) : ScheduleDates.projectStart(project);
+        LocalDate end = ScheduleDates.taskEnd(task) != null ? ScheduleDates.taskEnd(task) : ScheduleDates.projectEnd(project);
         return new Window(start, end);
     }
-    private boolean isProjectAllocationActive(ProjectResourceAllocation allocation) {
-        LocalDate today = LocalDate.now(); Project project = allocation.getProject();
-        return (project.getStartDate() == null || !today.isBefore(project.getStartDate()))
-                && (project.getEndDate() == null || !today.isAfter(project.getEndDate()));
-    }
-    private Window window(Project project) { return new Window(project.getStartDate(), project.getEndDate()); }
+    private Window window(Project project) { return new Window(ScheduleDates.projectStart(project), ScheduleDates.projectEnd(project)); }
     private boolean overlaps(Window left, Window right) {
         return (left.end() == null || right.start() == null || !left.end().isBefore(right.start()))
                 && (right.end() == null || left.start() == null || !right.end().isBefore(left.start()));

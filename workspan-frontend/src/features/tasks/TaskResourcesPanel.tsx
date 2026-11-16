@@ -3,6 +3,8 @@ import { getApiErrorMessage } from '../../api/http'
 import { taskResourceService } from '../../api/taskResourceService'
 import type { Project, Task, TaskResourceAllocation, TaskResourceOption } from '../../api/types'
 
+const isAssignable = (item: TaskResourceOption) => !item.assignedToTask && (item.type === 'HUMAN' || (item.type === 'EQUIPMENT' ? (item.availableQuantity ?? 0) > 0 : (item.availableAmount ?? 0) > 0))
+
 function dateLabel(value: string | null) { return value ? new Date(`${value}T00:00:00`).toLocaleDateString('fr-FR') : 'Fin indéterminée' }
 
 export function TaskResourcesPanel({ task, project, onClose }: { task: Task; project: Project; onClose: () => void }) {
@@ -11,6 +13,7 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
   const [resourceId, setResourceId] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [amount, setAmount] = useState('')
+  const [percent, setPercent] = useState('100')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -19,7 +22,7 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
   async function refresh() {
     const [poolData, assignedData] = await Promise.all([taskResourceService.pool(task.id), taskResourceService.assigned(task.id)])
     setPool(poolData); setAssigned(assignedData)
-    setResourceId(current => poolData.some(item => item.resourceId === current && !item.assignedToTask) ? current : poolData.find(item => !item.assignedToTask && (item.type === 'HUMAN' ? (item.availableQuantity ?? 0) > 0 : item.type === 'EQUIPMENT' ? (item.availableQuantity ?? 0) > 0 : (item.availableAmount ?? 0) > 0))?.resourceId ?? '')
+    setResourceId(current => poolData.some(item => item.resourceId === current && !item.assignedToTask) ? current : poolData.find(item => isAssignable(item))?.resourceId ?? '')
   }
 
   useEffect(() => {
@@ -28,7 +31,7 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
     Promise.all([taskResourceService.pool(task.id), taskResourceService.assigned(task.id)]).then(([poolData, assignedData]) => {
       if (!active) return
       setPool(poolData); setAssigned(assignedData)
-      setResourceId(poolData.find(item => !item.assignedToTask && (item.type === 'HUMAN' ? (item.availableQuantity ?? 0) > 0 : item.type === 'EQUIPMENT' ? (item.availableQuantity ?? 0) > 0 : (item.availableAmount ?? 0) > 0))?.resourceId ?? '')
+      setResourceId(poolData.find(item => isAssignable(item))?.resourceId ?? '')
     }).catch(cause => { if (active) setError(getApiErrorMessage(cause, 'Impossible de charger le pool de ressources de la tâche.')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -39,9 +42,9 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
     setSaving(true); setError('')
     try {
       const payload = selected.type === 'EQUIPMENT' ? { resourceId, quantity: Number(quantity) }
-        : selected.type === 'BUDGET' ? { resourceId, amount: Number(amount) } : { resourceId }
+        : selected.type === 'BUDGET' ? { resourceId, amount: Number(amount) } : { resourceId, allocationPercent: Number(percent) }
       await taskResourceService.assign(task.id, payload)
-      setQuantity('1'); setAmount(''); await refresh()
+      setQuantity('1'); setAmount(''); setPercent('100'); await refresh()
     } catch (cause) { setError(getApiErrorMessage(cause, 'Impossible d’affecter cette ressource à la tâche.')) }
     finally { setSaving(false) }
   }
@@ -53,8 +56,8 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
     finally { setSaving(false) }
   }
 
-  const plannedStart = task.startDate ?? project.startDate
-  const plannedEnd = task.endDate ?? project.endDate
+  const plannedStart = task.startDate ?? task.baselineStart ?? project.baselineStart
+  const plannedEnd = task.endDate ?? task.baselineEnd ?? project.baselineEnd
   const today = new Date().toISOString().slice(0, 10)
 
   return <section className="task-resource-panel" aria-label={`Ressources de la tâche ${task.name}`}>
@@ -64,13 +67,14 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
       <div className="task-resource-window"><strong>Période prévue</strong><span>{dateLabel(plannedStart)} – {dateLabel(plannedEnd)}</span><small>La tâche utilise les dates du projet lorsqu’elle n’a pas de date propre.</small></div>
       <form className="project-resource-form" onSubmit={submit}>
         <p className="field-hint">Le budget affecte reste engage apres la fin de la tache. Retirez-le avant la fin pour le rendre au pool du projet.</p>
-        <div className="form-field"><label htmlFor={`task-pool-resource-${task.id}`}>Ressource disponible <span>*</span></label><select id={`task-pool-resource-${task.id}`} required value={resourceId} onChange={event => { setResourceId(event.target.value); setAmount(''); setQuantity('1') }}><option value="">Choisir dans le pool du projet</option>{pool.filter(item => !item.assignedToTask && (item.type === 'HUMAN' ? (item.availableQuantity ?? 0) > 0 : item.type === 'EQUIPMENT' ? (item.availableQuantity ?? 0) > 0 : (item.availableAmount ?? 0) > 0)).map(item => <option key={item.resourceId} value={item.resourceId}>{item.type === 'HUMAN' ? 'Employé' : item.type === 'EQUIPMENT' ? 'Équipement' : 'Budget'} · {item.name}</option>)}</select></div>
+        <div className="form-field"><label htmlFor={`task-pool-resource-${task.id}`}>Ressource disponible <span>*</span></label><select id={`task-pool-resource-${task.id}`} required value={resourceId} onChange={event => { setResourceId(event.target.value); setAmount(''); setQuantity('1'); setPercent('100') }}><option value="">Choisir dans le pool du projet</option>{pool.filter(isAssignable).map(item => <option key={item.resourceId} value={item.resourceId}>{item.type === 'HUMAN' ? `Employé · ${item.name} · capacité libre ${item.availableQuantity ?? 0} %` : `${item.type === 'EQUIPMENT' ? 'Équipement' : 'Budget'} · ${item.name}`}</option>)}</select></div>
+        {selected?.type === 'HUMAN' && <div className="form-field"><label htmlFor={`task-pool-percent-${task.id}`}>Charge sur cette tâche (% de la journée) <span>*</span></label><input id={`task-pool-percent-${task.id}`} type="number" min="1" max="100" step="5" required value={percent} onChange={event => setPercent(event.target.value)} />{Number(percent) > (selected.availableQuantity ?? 0) ? <small className="field-hint workload-warning">⚠ Capacité libre sur la période : {selected.availableQuantity ?? 0} %. Cette affectation créera une surcharge, visible dans « Charge des ressources ».</small> : <small className="field-hint">Capacité libre sur la période : {selected.availableQuantity ?? 0} %.</small>}</div>}
         {selected?.type === 'EQUIPMENT' && <div className="form-field"><label htmlFor={`task-pool-quantity-${task.id}`}>Unités disponibles sur cette période ({selected.availableQuantity})</label><input id={`task-pool-quantity-${task.id}`} type="number" min="1" max={selected.availableQuantity ?? undefined} step="1" required value={quantity} onChange={event => setQuantity(event.target.value)} /></div>}
         {selected?.type === 'BUDGET' && <div className="form-field"><label htmlFor={`task-pool-amount-${task.id}`}>Budget disponible sur cette période ({selected.availableAmount} {selected.currency})</label><input id={`task-pool-amount-${task.id}`} type="number" min="0.01" max={selected.availableAmount ?? undefined} step="0.01" required value={amount} onChange={event => setAmount(event.target.value)} /></div>}
         <button type="submit" className="primary-button" disabled={saving || task.status === 'DONE' || !resourceId}>{saving ? 'Enregistrement…' : 'Affecter à la tâche'}</button>
         {task.status === 'DONE' && <small className="field-hint">Cette tâche est terminée : ses ressources sont libérées.</small>}
       </form>
-      <div className="task-resource-assigned"><h3>Ressources de cette tâche ({assigned.length})</h3>{assigned.length ? assigned.map(item => { const state = item.active ? item.endDate ? `Affectée jusqu’au ${dateLabel(item.endDate)} · libre le ${dateLabel(item.availableFrom)}` : 'Affectée · fin indéterminée' : task.status === 'DONE' ? 'Libérée, tâche terminée' : item.startDate && today < item.startDate ? 'Réservation prévue' : `Libérée${item.availableFrom ? ` le ${dateLabel(item.availableFrom)}` : ''}`; return <article className="crud-row" key={item.resourceId}><div className={`crud-symbol ${item.type === 'HUMAN' ? 'green' : item.type === 'BUDGET' ? 'orange' : 'blue'}`}>{item.type === 'HUMAN' ? 'H' : item.type === 'BUDGET' ? '$' : 'E'}</div><div className="crud-row-main"><strong>{item.name}</strong><small>{item.type === 'HUMAN' ? '1 employé' : item.type === 'EQUIPMENT' ? `${item.quantity} unité(s)` : `${item.amount} ${item.currency}`} · {state} · {dateLabel(item.startDate)} – {dateLabel(item.endDate)}</small><small>Ajoutée le {new Date(item.allocatedAt).toLocaleDateString('fr-FR')}</small></div><button type="button" className="secondary-button" disabled={saving} onClick={() => void remove(item)}>Retirer</button></article>}) : <p className="field-hint">Aucune ressource n’est affectée à cette tâche.</p>}</div>
+      <div className="task-resource-assigned"><h3>Ressources de cette tâche ({assigned.length})</h3>{assigned.length ? assigned.map(item => { const state = item.active ? item.endDate ? `Affectée jusqu’au ${dateLabel(item.endDate)} · libre le ${dateLabel(item.availableFrom)}` : 'Affectée · fin indéterminée' : task.status === 'DONE' ? 'Libérée, tâche terminée' : item.startDate && today < item.startDate ? 'Réservation prévue' : `Libérée${item.availableFrom ? ` le ${dateLabel(item.availableFrom)}` : ''}`; return <article className="crud-row" key={item.resourceId}><div className={`crud-symbol ${item.type === 'HUMAN' ? 'green' : item.type === 'BUDGET' ? 'orange' : 'blue'}`}>{item.type === 'HUMAN' ? 'H' : item.type === 'BUDGET' ? '$' : 'E'}</div><div className="crud-row-main"><strong>{item.name}</strong><small>{item.type === 'HUMAN' ? `Charge ${item.allocationPercent ?? 100} %` : item.type === 'EQUIPMENT' ? `${item.quantity} unité(s)` : `${item.amount} ${item.currency}`} · {state} · {dateLabel(item.startDate)} – {dateLabel(item.endDate)}</small><small>Ajoutée le {new Date(item.allocatedAt).toLocaleDateString('fr-FR')}</small></div><button type="button" className="secondary-button" disabled={saving} onClick={() => void remove(item)}>Retirer</button></article>}) : <p className="field-hint">Aucune ressource n’est affectée à cette tâche.</p>}</div>
     </div>}
   </section>
 }
