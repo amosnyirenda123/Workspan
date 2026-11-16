@@ -27,7 +27,7 @@ function App() {
   const [authReady, setAuthReady] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccess | null>(null)
-  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('spaces')
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('overview')
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
   const [passwordError, setPasswordError] = useState('')
   const [passwordSaving, setPasswordSaving] = useState(false)
@@ -61,9 +61,9 @@ function App() {
   const hasWorkspacePermission = (keys: string[]) => keys.some(key => canOrganization(effectiveAccess, key)
     || Object.values(effectiveAccess?.spacePermissions ?? {}).some(permissions => permissions.includes(key))
     || Object.values(effectiveAccess?.projectPermissions ?? {}).some(permissions => permissions.includes(key)))
-  const canUseSpaces = hasWorkspacePermission(['space.view', 'space.create', 'space.edit', 'space.delete', 'project.create', 'project.view', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
-  const canUseProjects = hasWorkspacePermission(['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage', 'task.view', 'task.create', 'task.edit', 'task.delete'])
-  const canUseTasks = hasWorkspacePermission(['task.view', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'])
+  const canUseSpaces = hasWorkspacePermission(['space.view', 'space.create', 'space.edit', 'space.delete', 'project.create'])
+  const canUseProjects = hasWorkspacePermission(['project.view', 'project.create', 'project.edit', 'project.delete', 'project.resources.manage'])
+  const canUseTasks = hasWorkspacePermission(['task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'])
   const canUseResources = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage'])
   const canUseAccessManagement = hasWorkspacePermission(['access.manage'])
   const canUseAnalytics = hasWorkspacePermission(['analytics.view'])
@@ -71,6 +71,30 @@ function App() {
   const canUseWorkload = hasWorkspacePermission(['workload.view'])
   const canViewAnalyticsEmployees = hasWorkspacePermission(['employee.view', 'employee.manage_accounts'])
   const canViewAnalyticsPools = hasWorkspacePermission(['resource.pool.view', 'resource.pool.manage', 'project.resources.manage'])
+  const firstAvailableSection: WorkspaceSection = canViewOrganization ? 'overview'
+    : canUseSpaces ? 'spaces' : canUseProjects ? 'projects' : canUseTasks ? 'tasks' : canUseGantt ? 'gantt'
+      : canUseWorkload ? 'workload' : canUseResources ? 'resources' : canUseAccessManagement ? 'access' : canUseAnalytics ? 'analytics' : 'overview'
+
+  useEffect(() => {
+    if (!authUser || !effectiveAccess || !isOrganizationsPage) return
+    const allowed: Record<WorkspaceSection, boolean> = {
+      overview: canViewOrganization, spaces: canUseSpaces, projects: canUseProjects, tasks: canUseTasks,
+      gantt: canUseGantt, workload: canUseWorkload, resources: canUseResources, access: canUseAccessManagement, analytics: canUseAnalytics,
+    }
+    if (allowed[workspaceSection]) return
+    if (canUseEmployeeSection && firstAvailableSection === 'overview') {
+      window.history.replaceState({}, '', '/employees')
+      setPathname('/employees')
+    }
+    else setWorkspaceSection(firstAvailableSection)
+  }, [authUser, effectiveAccess, isOrganizationsPage, workspaceSection, canViewOrganization, canUseSpaces, canUseProjects, canUseTasks, canUseGantt, canUseWorkload, canUseResources, canUseAccessManagement, canUseAnalytics, canUseEmployeeSection, firstAvailableSection])
+
+  useEffect(() => {
+    if (authUser && effectiveAccess && isEmployeesPage && !canUseEmployeeSection) {
+      window.history.replaceState({}, '', '/organizations')
+      setPathname('/organizations')
+    }
+  }, [authUser, effectiveAccess, isEmployeesPage, canUseEmployeeSection])
 
   function openWorkspaceSection(section: WorkspaceSection) {
     setWorkspaceSection(section)
@@ -193,7 +217,7 @@ function App() {
   const currentDetail = detail?.id === detailId ? detail : null
   const currentDetailError = detailError?.id === detailId ? detailError.message : ''
   const today = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const workspaceTitles: Record<WorkspaceSection, string> = { spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', gantt: 'Planification (Gantt)', workload: 'Charge des ressources', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
+  const workspaceTitles: Record<WorkspaceSection, string> = { overview: 'Overview', spaces: 'Espaces', projects: 'Projets', tasks: 'Tâches', gantt: 'Planification (Gantt)', workload: 'Charge des ressources', resources: 'Pools de ressources', access: 'Rôles et permissions', analytics: 'Analyses' }
   const pageTitle = detailId ? 'Fiche organisation' : isEmployeesPage ? 'Employés' : isOrganizationsPage ? workspaceTitles[workspaceSection] : 'Organisations'
 
   async function logout() {
@@ -220,16 +244,19 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/') }}><span className="brand-mark">W</span> Workspan</a>
-        <p className="nav-label">ESPACE DE TRAVAIL</p>
-        {canUseSpaces && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'spaces' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('spaces') }}><span>▦</span> Espaces</a>}
-        {canUseProjects && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'projects' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('projects') }}><span>◈</span> Projets</a>}
-        {canUseTasks && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'tasks' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('tasks') }}><span>☑</span> Tâches</a>}
-        {canUseGantt && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'gantt' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('gantt') }}><span>▤</span> Planification (Gantt)</a>}
-        {canUseWorkload && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'workload' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('workload') }}><span>▦</span> Charge des ressources</a>}
-        {canUseEmployeeSection && <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>♙</span> Employés</a>}
-        {canUseResources && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'resources' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('resources') }}><span>⬡</span> Ressources</a>}
-        {canUseAccessManagement && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'access' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('access') }}><span>⚿</span> Rôles et permissions</a>}
-        {canUseAnalytics && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'analytics' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('analytics') }}><span>▥</span> Analyses</a>}
+        {canViewOrganization && <><p className="nav-label">VUE D&#x27;ENSEMBLE</p><a className={`nav-item ${isOrganizationsPage && workspaceSection === 'overview' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('overview') }}><span>&#x2302;</span> Aper&#xE7;u</a></>}
+        {(canUseSpaces || canUseEmployeeSection || canUseResources || canUseAccessManagement) && <p className="nav-label">CONFIGURATION</p>}
+        {canUseSpaces && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'spaces' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('spaces') }}><span>&#x25A6;</span> Espaces</a>}
+        {canUseEmployeeSection && <a className={`nav-item ${isEmployeesPage ? 'active' : ''}`} href="/employees" onClick={event => { event.preventDefault(); navigate('/employees') }}><span>&#x2659;</span> Employ&#xE9;s</a>}
+        {canUseResources && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'resources' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('resources') }}><span>&#x2B21;</span> Pools de ressources</a>}
+        {canUseAccessManagement && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'access' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('access') }}><span>&#x26BF;</span> R&#xF4;les et permissions</a>}
+        {(canUseProjects || canUseTasks || canUseGantt) && <p className="nav-label">R&#xC9;ALISATION</p>}
+        {canUseProjects && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'projects' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('projects') }}><span>&#x25C8;</span> Projets</a>}
+        {canUseTasks && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'tasks' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('tasks') }}><span>&#x2611;</span> T&#xE2;ches</a>}
+        {canUseGantt && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'gantt' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('gantt') }}><span>&#x25A4;</span> Planification Gantt</a>}
+        {(canUseWorkload || canUseAnalytics) && <p className="nav-label">PILOTAGE</p>}
+        {canUseWorkload && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'workload' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('workload') }}><span>&#x25A6;</span> Charge des ressources</a>}
+        {canUseAnalytics && <a className={`nav-item ${isOrganizationsPage && workspaceSection === 'analytics' ? 'active' : ''}`} href="/organizations" onClick={event => { event.preventDefault(); openWorkspaceSection('analytics') }}><span>&#x25A5;</span> Analyses</a>}
         <div className="sidebar-bottom"><div className="avatar">W</div><div><strong>Workspan</strong><small>Gestion de projets</small></div></div>
       </aside>
 
@@ -237,7 +264,7 @@ function App() {
         <header className="topbar"><span>Workspan <b>/</b> {pageTitle}</span><span className="connection">{authUser?.displayName} · <button type="button" className="logout-button" onClick={() => void logout()}>Déconnexion</button></span></header>
         <div className="content">
           {isOrganizationsPage && <>
-            {canViewOrganization && <><div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour, {authUser?.displayName.split(' ')[0]} ! <span>✳</span></h1><p className="subtitle">Bienvenue dans l’espace de travail de {authUser?.organizationName}.</p></div></div>
+            {workspaceSection === 'overview' && canViewOrganization && <><div className="page-heading"><div><p className="eyebrow">{today}</p><h1>Bonjour, {authUser?.displayName.split(' ')[0]} ! <span>✳</span></h1><p className="subtitle">Bienvenue dans l’espace de travail de {authUser?.organizationName}.</p></div></div>
 
             {listError && <div className="alert" role="alert">{listError} <button className="text-button" onClick={() => void loadOrganizations()}>Réessayer</button></div>}
 
@@ -253,10 +280,10 @@ function App() {
               <div className="list-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher une organisation" aria-label="Rechercher une organisation" /></label><button className="secondary-button" onClick={() => void loadOrganizations()}>↻ Actualiser</button></div>
               {listLoading ? <div className="empty-state">Chargement des organisations…</div> : organizations.length === 0 ? <div className="empty-state"><div className="empty-icon">◫</div><strong>Aucune organisation pour le moment</strong><p>Créez votre première organisation pour commencer.</p><button className="primary-button" onClick={() => navigate('/organizations/new')}>＋ Créer une organisation</button></div> : filteredOrganizations.length === 0 ? <div className="empty-state"><strong>Aucun résultat</strong><p>Essayez un autre nom d’organisation.</p></div> : <div className="org-list">{filteredOrganizations.map(organization => <button className="org-row" key={organization.id} onClick={() => navigate(`/organizations/${organization.id}`)}><div className="org-mark">{organization.name.charAt(0).toUpperCase()}</div><div className="org-name"><strong>{organization.name}</strong><small>Créée le {new Date(organization.createdAt).toLocaleDateString('fr-FR')}</small></div><div className="org-metric"><strong>{organization.spaces}</strong><small>Espaces</small></div><div className="org-metric"><strong>{organization.projects}</strong><small>Projets</small></div><div className="org-metric"><strong>{organization.tasks}</strong><small>Tâches</small></div><span className="row-arrow">›</span></button>)}</div>}
             </section></>}
-            <WorkspaceCrud section={workspaceSection} onSectionChange={setWorkspaceSection} access={effectiveAccess} canViewAnalyticsEmployees={canViewAnalyticsEmployees} canViewAnalyticsPools={canViewAnalyticsPools} onChange={() => { void loadOrganizations() }} />
+            {workspaceSection !== 'overview' && <WorkspaceCrud section={workspaceSection} access={effectiveAccess} canViewAnalyticsEmployees={canViewAnalyticsEmployees} canViewAnalyticsPools={canViewAnalyticsPools} onChange={() => { void loadOrganizations() }} />}
           </>}
 
-          {isEmployeesPage && <>
+          {isEmployeesPage && canUseEmployeeSection && <>
             <div className="page-heading"><div><p className="eyebrow">ADMINISTRATION DE L'ORGANISATION</p><h1>Employés</h1><p className="subtitle">Créez et consultez les membres de votre organisation.</p></div></div>
             <EmployeesManager onChange={() => { void loadOrganizations() }} />
           </>}

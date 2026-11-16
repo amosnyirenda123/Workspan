@@ -151,7 +151,7 @@ public class WorkspaceAccess {
         return List.of("space.view", "space.edit", "space.delete", "project.create", "employee.view", "employee.create", "employee.manage_accounts", "resource.pool.view", "resource.pool.manage", "analytics.view", "workload.view")
                 .stream().anyMatch(key -> hasSpacePermission(userId, organizationId, spaceId, key))
                 || projects.findAllBySpaceIdOrderByNameAsc(spaceId).stream()
-                .anyMatch(project -> List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.create", "task.edit", "task.delete", "gantt.view", "workload.view", "access.manage", "analytics.view")
+                .anyMatch(project -> List.of("project.view", "project.edit", "project.delete", "project.resources.manage", "task.view", "task.view.kanban", "task.view.scrum", "task.create", "task.edit", "task.delete", "gantt.view", "workload.view", "access.manage", "analytics.view")
                         .stream().anyMatch(key -> hasProjectPermission(userId, organizationId, spaceId, project.getId(), key)));
     }
 

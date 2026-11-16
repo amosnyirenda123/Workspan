@@ -60,14 +60,14 @@ public class TaskController {
     @GetMapping @Operation(summary = "Lister les tâches de l’organisation")
     public List<TaskResponse> findAll(HttpSession session) {
         UUID userId = access.userId(session); UUID organizationId = access.organizationId(session);
-        return tasks.findAll(organizationId).stream().filter(task -> java.util.List.of("task.view", "task.edit", "task.delete", "project.resources.manage", "analytics.view")
+        return tasks.findAll(organizationId).stream().filter(task -> java.util.List.of("task.view", "task.view.kanban", "task.view.scrum", "task.edit", "task.delete", "project.resources.manage", "analytics.view")
                 .stream().anyMatch(key -> access.hasProjectPermissionById(userId, organizationId, task.projectId(), key))).toList();
     }
 
     @GetMapping("/{id}") @Operation(summary = "Lire une tâche")
     public TaskResponse findById(@PathVariable UUID id, HttpSession session) {
         UUID organizationId = access.organizationId(session); TaskResponse task = tasks.findById(id, organizationId);
-        access.requireProjectAnyPermission(session, task.projectId(), java.util.List.of("task.view", "task.edit", "task.delete", "project.resources.manage")); return task;
+        access.requireProjectAnyPermission(session, task.projectId(), java.util.List.of("task.view", "task.view.kanban", "task.view.scrum", "task.edit", "task.delete", "project.resources.manage")); return task;
     }
 
     @PostMapping @ResponseStatus(HttpStatus.CREATED) @Operation(summary = "Créer une tâche")

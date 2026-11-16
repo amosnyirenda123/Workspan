@@ -85,7 +85,24 @@ export function AccessManager() {
     setContextId(next === 'ORGANIZATION' ? context?.organizationId ?? '' : next === 'SPACE' ? context?.spaces[0]?.id ?? '' : context?.projects[0]?.id ?? '')
   }
 
-  function editRole(role: AccessRole) { setEditingId(role.id); setRoleName(role.name); setSelectedPermissions(role.permissionKeys); setError('') }
+  function editRole(role: AccessRole) {
+    const permissions = new Set(role.permissionKeys)
+    if (permissions.has('workload.manage')) permissions.add('workload.view')
+    if (permissions.has('gantt.schedule.manage') || permissions.has('gantt.dependencies.manage')) permissions.add('gantt.view')
+    setEditingId(role.id); setRoleName(role.name); setSelectedPermissions([...permissions]); setError('')
+  }
+
+  function togglePermission(key: string, checked: boolean) {
+    const requiredView = key === 'workload.manage' ? 'workload.view'
+      : key === 'gantt.schedule.manage' || key === 'gantt.dependencies.manage' ? 'gantt.view' : null
+    const dependentPermissions = key === 'workload.view' ? ['workload.manage']
+      : key === 'gantt.view' ? ['gantt.schedule.manage', 'gantt.dependencies.manage'] : []
+    setSelectedPermissions(current => {
+      const next = checked ? [...current, key, ...(requiredView ? [requiredView] : [])]
+        : [ ...current.filter(item => item !== key && !(dependentPermissions.includes(item) && !checked)) ]
+      return [...new Set(next)]
+    })
+  }
   function resetForm() { setEditingId(null); setRoleName(''); setSelectedPermissions([]) }
 
   async function saveRole(event: FormEvent<HTMLFormElement>) {
@@ -141,7 +158,7 @@ export function AccessManager() {
         <form className="organization-form" onSubmit={saveRole}><div className="form-field"><label htmlFor="role-name">Nom du rôle <span>*</span></label><input id="role-name" required maxLength={60} value={roleName} onChange={event => setRoleName(event.target.value)} /></div>
           <fieldset className="permission-picker"><legend>Permissions · {selectedPermissions.length} sélectionnée(s)</legend>
             <div className="permission-filters"><div className="form-field"><label htmlFor="permission-action-filter">Action</label><select id="permission-action-filter" value={permissionActionFilter} onChange={event => setPermissionActionFilter(event.target.value)}><option value="ALL">Toutes les actions</option>{permissionActions.map(action => <option key={action} value={action}>{action}</option>)}</select></div><div className="form-field"><label htmlFor="permission-category-filter">Fonctionnalité</label><select id="permission-category-filter" value={permissionCategoryFilter} onChange={event => setPermissionCategoryFilter(event.target.value)}><option value="ALL">Toutes les fonctionnalités</option>{permissionCategories.map(category => <option key={category} value={category}>{category}</option>)}</select></div></div>
-            {permissionGroups.length ? <div className="permission-groups">{permissionGroups.map(group => <section className="permission-group" key={group.category}><h3>{group.category}<span>{group.permissions.length}</span></h3>{group.permissions.map(permission => <label key={permission.key} className="permission-option"><input type="checkbox" checked={selectedPermissions.includes(permission.key)} onChange={event => setSelectedPermissions(current => event.target.checked ? [...current, permission.key] : current.filter(key => key !== permission.key))} /><span><strong>{permission.label}</strong><small>{permission.description}</small></span><small className="permission-action">{permission.action}</small></label>)}</section>)}</div> : <p className="field-hint">Aucune permission ne correspond à ces filtres.</p>}
+            {permissionGroups.length ? <div className="permission-groups">{permissionGroups.map(group => <section className="permission-group" key={group.category}><h3>{group.category}<span>{group.permissions.length}</span></h3>{group.permissions.map(permission => <label key={permission.key} className="permission-option"><input type="checkbox" checked={selectedPermissions.includes(permission.key)} onChange={event => togglePermission(permission.key, event.target.checked)} /><span><strong>{permission.label}</strong><small>{permission.description}</small></span><small className="permission-action">{permission.action}</small></label>)}</section>)}</div> : <p className="field-hint">Aucune permission ne correspond à ces filtres.</p>}
           </fieldset>
           <div className="form-actions"><button className="primary-button" disabled={saving || !contextId}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer le rôle' : 'Créer le rôle'}</button>{editingId && <button type="button" className="secondary-button" onClick={resetForm}>Annuler</button>}</div>
         </form>

@@ -63,6 +63,8 @@ public final class PermissionCatalog {
             define("project.delete", "Delete projects", "Delete projects.", ALL_SCOPES),
             define("project.resources.manage", "Manage project resources", "Assign and release project resources.", ALL_SCOPES),
             define("task.view", "View tasks", "See tasks in accessible projects.", ALL_SCOPES),
+            define("task.view.kanban", "View Kanban boards", "See tasks arranged by status in Kanban columns.", ALL_SCOPES),
+            define("task.view.scrum", "View Scrum boards", "See the backlog and sprint work organized by status.", ALL_SCOPES),
             define("task.create", "Create tasks", "Add tasks to accessible projects.", ALL_SCOPES),
             define("task.edit", "Edit tasks", "Update tasks, their status, planned and actual dates.", ALL_SCOPES),
             define("task.delete", "Delete tasks", "Delete tasks.", ALL_SCOPES),
