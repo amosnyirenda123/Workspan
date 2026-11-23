@@ -10,6 +10,7 @@ import { EmployeesManager } from './features/employees/EmployeesManager'
 import { OrganizationSettings } from './features/workspace/OrganizationSettings'
 import { PasswordResetPage } from './features/auth/PasswordResetPage'
 import './App.css'
+import './design-system.css'
 
 type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
 
