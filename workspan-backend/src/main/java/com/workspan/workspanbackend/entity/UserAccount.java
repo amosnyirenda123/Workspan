@@ -25,6 +25,10 @@ public class UserAccount extends BaseEntity {
     private String status = "INVITED";
     private String invitationToken;
     private Instant invitationExpiresAt;
+    @Column(name = "password_reset_token_hash", length = 64)
+    private String passwordResetTokenHash;
+    @Column(name = "password_reset_expires_at")
+    private Instant passwordResetExpiresAt;
     @Column(name = "must_change_password", nullable = false, columnDefinition = "boolean default false")
     private boolean mustChangePassword;
     @Column(name = "credential_email_sent_at")
@@ -84,6 +88,11 @@ public class UserAccount extends BaseEntity {
     public void setInvitationExpiresAt(Instant v) {
         invitationExpiresAt = v;
     }
+
+    public String getPasswordResetTokenHash() { return passwordResetTokenHash; }
+    public void setPasswordResetTokenHash(String value) { passwordResetTokenHash = value; }
+    public Instant getPasswordResetExpiresAt() { return passwordResetExpiresAt; }
+    public void setPasswordResetExpiresAt(Instant value) { passwordResetExpiresAt = value; }
 
     public boolean isMustChangePassword() { return mustChangePassword; }
 

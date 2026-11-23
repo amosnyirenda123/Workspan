@@ -1,6 +1,7 @@
 package com.workspan.workspanbackend.dto;
 
 import com.workspan.workspanbackend.entity.TaskStatus;
+import com.workspan.workspanbackend.entity.TaskPriority;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -18,6 +19,9 @@ public record TaskRequest(
         @NotNull UUID projectId,
         @NotBlank @Size(max = 160) String name,
         @NotNull TaskStatus status,
+        TaskPriority priority,
+        @Min(1) @Max(1000) Integer estimatePoints,
+        LocalDate dueDate,
         LocalDate baselineStart,
         LocalDate baselineEnd,
         LocalDate startDate,

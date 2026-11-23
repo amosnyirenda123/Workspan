@@ -95,17 +95,24 @@ export function AccessManager() {
     const permissions = new Set(role.permissionKeys)
     if (permissions.has('workload.manage')) permissions.add('workload.view')
     if (permissions.has('gantt.schedule.manage') || permissions.has('gantt.dependencies.manage')) permissions.add('gantt.view')
+    if (permissions.has('organization.edit')) permissions.add('organization.view')
+    if (permissions.has('task.sprint.manage')) { permissions.add('task.view.scrum'); permissions.add('task.edit') }
     setEditingId(role.id); setRoleName(role.name); setSelectedPermissions([...permissions]); setError('')
   }
 
   function togglePermission(key: string, checked: boolean) {
     const requiredView = key === 'workload.manage' ? 'workload.view'
-      : key === 'gantt.schedule.manage' || key === 'gantt.dependencies.manage' ? 'gantt.view' : null
+      : key === 'gantt.schedule.manage' || key === 'gantt.dependencies.manage' ? 'gantt.view'
+        : key === 'organization.edit' ? 'organization.view' : null
     const dependentPermissions = key === 'workload.view' ? ['workload.manage']
-      : key === 'gantt.view' ? ['gantt.schedule.manage', 'gantt.dependencies.manage'] : []
+      : key === 'gantt.view' ? ['gantt.schedule.manage', 'gantt.dependencies.manage']
+        : key === 'organization.view' ? ['organization.edit'] : []
     setSelectedPermissions(current => {
-      const next = checked ? [...current, key, ...(requiredView ? [requiredView] : [])]
-        : [ ...current.filter(item => item !== key && !(dependentPermissions.includes(item) && !checked)) ]
+      const required = key === 'task.sprint.manage' ? ['task.view.scrum', 'task.edit'] : requiredView ? [requiredView] : []
+      const dependents = key === 'task.view.scrum' || key === 'task.edit'
+        ? ['task.sprint.manage'] : dependentPermissions
+      const next = checked ? [...current, key, ...required]
+        : [ ...current.filter(item => item !== key && !(dependents.includes(item) && !checked)) ]
       return [...new Set(next)]
     })
   }

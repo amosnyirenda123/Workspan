@@ -12,10 +12,11 @@ export type Organization = {
   tasks: number
   createdAt: string
 }
+export type OrganizationUpdateRequest = Pick<Organization, 'name' | 'description' | 'website' | 'contactEmail' | 'phone'>
 
 export type Space = { id: string; organizationId: string; name: string; createdAt: string }
 export type SpaceRequest = { name: string }
-export type Employee = { id: string; spaceId: string; spaceName: string; name: string; email: string | null; jobTitle: string | null; status: string; hasAccount: boolean; credentialEmailSentAt: string | null; createdAt: string }
+export type Employee = { id: string; spaceId: string; spaceName: string; name: string; email: string | null; jobTitle: string | null; status: string; hasAccount: boolean; accountActive: boolean; credentialEmailSentAt: string | null; createdAt: string }
 export type EmployeeRequest = { spaceId: string; name: string; email: string; jobTitle?: string | null }
 export type EmployeeImportRow = EmployeeRequest & { rowNumber: number }
 export type EmployeeImportRequest = { employees: EmployeeImportRow[] }
@@ -51,13 +52,19 @@ export type AccessRoleRequest = { name: string; scope: RoleScope; contextId: str
 export type RoleAssignment = { userId: string; displayName: string; email: string; roleId: string; roleName: string; scope: RoleScope; assignedAt: string }
 
 export type TaskStatus = 'TODO' | 'STARTED' | 'BLOCKED' | 'DONE'
+export type TaskPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT'
 /** baselineStart/baselineEnd = planned dates; startDate/endDate = actual dates. */
 export type Task = {
-  id: string; projectId: string; name: string; status: TaskStatus
+  id: string; projectId: string; sprintId: string | null; name: string; status: TaskStatus; priority: TaskPriority; estimatePoints: number | null; dueDate: string | null
   baselineStart: string | null; baselineEnd: string | null
   startDate: string | null; endDate: string | null; progress: number; createdAt: string
 }
-export type TaskRequest = { projectId: string; name: string; status: TaskStatus; baselineStart?: string | null; baselineEnd?: string | null; startDate?: string | null; endDate?: string | null; progress?: number | null }
+export type SprintStatus = 'PLANNED' | 'ACTIVE' | 'COMPLETED'
+export type Sprint = { id: string; projectId: string; name: string; goal: string | null; startDate: string | null; endDate: string | null; status: SprintStatus; taskCount: number; completedTaskCount: number; createdAt: string }
+export type SprintRequest = { projectId: string; name: string; goal?: string | null; startDate?: string | null; endDate?: string | null; status: SprintStatus }
+export type TaskRequest = { projectId: string; name: string; status: TaskStatus; priority: TaskPriority; estimatePoints: number | null; dueDate: string | null; baselineStart?: string | null; baselineEnd?: string | null; startDate?: string | null; endDate?: string | null; progress?: number | null }
+export type TaskComment = { id: string; taskId: string; authorId: string; authorName: string; body: string; createdAt: string }
+export type TaskActivity = { id: string; taskId: string; projectId: string; actorId: string | null; actorName: string; action: string; summary: string; createdAt: string }
 
 export type DependencyType = 'FINISH_TO_START' | 'START_TO_START' | 'FINISH_TO_FINISH' | 'START_TO_FINISH'
 export type TaskDependency = { id: string; predecessorTaskId: string; predecessorName: string; successorTaskId: string; successorName: string; type: DependencyType; lag: number }

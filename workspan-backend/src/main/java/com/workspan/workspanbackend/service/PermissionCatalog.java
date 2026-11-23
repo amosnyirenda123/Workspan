@@ -28,6 +28,7 @@ public final class PermissionCatalog {
             case "resource" -> "Ressources";
             case "project" -> "Projets";
             case "task" -> "Tâches";
+            case "sprint" -> "Sprints";
             case "gantt" -> "Planification (Gantt)";
             case "workload" -> "Charge des ressources";
             case "analytics" -> "Analyses";
@@ -47,6 +48,7 @@ public final class PermissionCatalog {
 
     public static final List<Definition> DEFINITIONS = List.of(
             define("organization.view", "View organization overview", "See organization level information.", ORGANIZATION_ONLY),
+            define("organization.edit", "Edit organization profile", "Update organization contact and profile details.", ORGANIZATION_ONLY),
             define("analytics.view", "View analytics", "See available project, employee, resource, and budget allocation analytics.", ALL_SCOPES),
             define("space.view", "View spaces", "See spaces and their content.", ORGANIZATION_AND_SPACE),
             define("space.create", "Create spaces", "Create new spaces in the organization.", ORGANIZATION_ONLY),
@@ -65,6 +67,8 @@ public final class PermissionCatalog {
             define("task.view", "View tasks", "See tasks in accessible projects.", ALL_SCOPES),
             define("task.view.kanban", "View Kanban boards", "See tasks arranged by status in Kanban columns.", ALL_SCOPES),
             define("task.view.scrum", "View Scrum boards", "See the backlog and sprint work organized by status.", ALL_SCOPES),
+            define("task.comment", "Comment on tasks", "Read and add discussion comments to tasks.", ALL_SCOPES),
+            define("task.sprint.manage", "Manage sprints", "Create and plan sprints and assign backlog tasks to them.", ALL_SCOPES),
             define("task.create", "Create tasks", "Add tasks to accessible projects.", ALL_SCOPES),
             define("task.edit", "Edit tasks", "Update tasks, their status, planned and actual dates.", ALL_SCOPES),
             define("task.delete", "Delete tasks", "Delete tasks.", ALL_SCOPES),

@@ -1,12 +1,14 @@
 package com.workspan.workspanbackend.controller;
 
 import com.workspan.workspanbackend.dto.OrganizationResponse;
+import com.workspan.workspanbackend.dto.OrganizationUpdateRequest;
 import com.workspan.workspanbackend.service.OrganizationService;
 import com.workspan.workspanbackend.service.WorkspaceAccess;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,5 +34,11 @@ public class OrganizationController {
     @GetMapping("/{id}")
     public OrganizationResponse findById(@PathVariable UUID id, HttpSession session) {
         return service.findById(id, access.requireOrganizationPermission(session, "organization.view"));
+    }
+
+    @PutMapping("/{id}")
+    public OrganizationResponse update(@PathVariable UUID id, @Valid @RequestBody OrganizationUpdateRequest request, HttpSession session) {
+        UUID organizationId = access.requireOrganizationPermission(session, "organization.edit");
+        return service.update(id, organizationId, request);
     }
 }

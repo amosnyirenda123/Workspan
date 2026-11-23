@@ -55,7 +55,7 @@ public class EmployeeWriter {
         employee.setStatus("AVAILABLE");
         HumanResource saved = employees.saveAndFlush(employee);
         return new EmployeeResponse(saved.getId(), space.getId(), space.getName(), saved.getName(),
-                saved.getEmail(), saved.getJobTitle(), saved.getStatus(), saved.getUser() != null,
+                saved.getEmail(), saved.getJobTitle(), saved.getStatus(), saved.getUser() != null, saved.getUser() != null && "ACTIVE".equals(saved.getUser().getStatus()),
                 saved.getUser() == null ? null : saved.getUser().getCredentialEmailSentAt(), saved.getCreatedAt());
     }
 
@@ -75,7 +75,7 @@ public class EmployeeWriter {
         employee.setEmail(email);
         HumanResource saved = employees.saveAndFlush(employee);
         return new EmployeeResponse(saved.getId(), saved.getSpace().getId(), saved.getSpace().getName(), saved.getName(),
-                saved.getEmail(), saved.getJobTitle(), saved.getStatus(), saved.getUser() != null,
+                saved.getEmail(), saved.getJobTitle(), saved.getStatus(), saved.getUser() != null, saved.getUser() != null && "ACTIVE".equals(saved.getUser().getStatus()),
                 saved.getUser() == null ? null : saved.getUser().getCredentialEmailSentAt(), saved.getCreatedAt());
     }
 }

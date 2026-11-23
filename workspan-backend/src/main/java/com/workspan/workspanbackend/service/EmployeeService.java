@@ -11,6 +11,8 @@ import com.workspan.workspanbackend.dto.EmployeeImportResponse;
 import com.workspan.workspanbackend.dto.EmployeeResponse;
 import com.workspan.workspanbackend.entity.HumanResource;
 import com.workspan.workspanbackend.repository.HumanResourceRepository;
+import com.workspan.workspanbackend.repository.UserAccountRepository;
+import com.workspan.workspanbackend.exception.ConflictException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,10 +27,12 @@ import java.util.UUID;
 public class EmployeeService {
     private final HumanResourceRepository employees;
     private final EmployeeWriter writer;
+    private final UserAccountRepository users;
 
-    public EmployeeService(HumanResourceRepository employees, EmployeeWriter writer) {
+    public EmployeeService(HumanResourceRepository employees, EmployeeWriter writer, UserAccountRepository users) {
         this.employees = employees;
         this.writer = writer;
+        this.users = users;
     }
 
     public List<EmployeeResponse> findAll(UUID organizationId) {
@@ -44,6 +48,22 @@ public class EmployeeService {
     @Transactional
     public EmployeeResponse updateEmail(UUID organizationId, UUID employeeId, EmployeeEmailRequest request) {
         return writer.updateEmail(organizationId, employeeId, request);
+    }
+
+    @Transactional
+    public EmployeeResponse setAccountEnabled(UUID organizationId, UUID employeeId, boolean enabled) {
+        HumanResource employee = employees.findByIdAndSpaceOrganizationId(employeeId, organizationId)
+                .orElseThrow(() -> new com.workspan.workspanbackend.exception.NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
+        if (employee.getUser() == null) throw new ConflictException(ErrorCode.EMPLOYEE_ACCOUNT_NOT_FOUND);
+        var account = employee.getUser();
+        if (enabled) {
+            if ("INVITED".equals(account.getStatus())) throw new ConflictException(ErrorCode.EMPLOYEE_ACCOUNT_NOT_FOUND);
+            account.setStatus("ACTIVE"); employee.setStatus("AVAILABLE");
+        } else {
+            account.setStatus("INACTIVE"); employee.setStatus("UNAVAILABLE");
+        }
+        users.save(account); employees.save(employee);
+        return toResponse(employee);
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -65,7 +85,7 @@ public class EmployeeService {
     private EmployeeResponse toResponse(HumanResource employee) {
         return new EmployeeResponse(employee.getId(), employee.getSpace().getId(), employee.getSpace().getName(),
                 employee.getName(), employee.getEmail(), employee.getJobTitle(), employee.getStatus(),
-                employee.getUser() != null,
+                employee.getUser() != null, employee.getUser() != null && "ACTIVE".equals(employee.getUser().getStatus()),
                 employee.getUser() == null ? null : employee.getUser().getCredentialEmailSentAt(), employee.getCreatedAt());
     }
 }

@@ -12,4 +12,5 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
     boolean existsByEmailIgnoreCase(String email);
     List<UserAccount> findAllByOrganizationIdAndStatusOrderByDisplayNameAsc(UUID organizationId, String status);
     Optional<UserAccount> findByIdAndOrganizationId(UUID id, UUID organizationId);
+    Optional<UserAccount> findByPasswordResetTokenHash(String tokenHash);
 }

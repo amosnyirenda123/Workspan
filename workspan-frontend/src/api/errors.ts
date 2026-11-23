@@ -65,8 +65,16 @@ const MESSAGES: Record<string, Message> = {
   PASSWORD_CHANGE_REQUIRED: 'Modifiez votre mot de passe temporaire avant de continuer.',
   CURRENT_PASSWORD_INCORRECT: 'Le mot de passe actuel est incorrect.',
   PASSWORD_REUSED: 'Choisissez un mot de passe différent de l’actuel.',
+  PASSWORD_RESET_TOKEN_INVALID: 'Ce lien de réinitialisation est invalide ou a expiré.',
   ACCOUNT_EMAIL_TAKEN: 'Un compte existe déjà avec cette adresse e-mail.',
   ORGANIZATION_NAME_TAKEN: 'Une organisation porte déjà ce nom.',
+  SPRINT_NAME_TAKEN: 'Un sprint porte déjà ce nom dans ce projet.',
+  SPRINT_ACTIVE_EXISTS: 'Un seul sprint peut être actif par projet.',
+  SPRINT_DATES_INVALID: 'La date de fin du sprint doit suivre sa date de début.',
+  SPRINT_TASK_PROJECT_MISMATCH: 'La tâche et le sprint doivent appartenir au même projet.',
+  SPRINT_MANAGE_REQUIRES_TASK_ACCESS: 'La gestion des sprints nécessite les droits Scrum et de modification des tâches.',
+  ORGANIZATION_EDIT_REQUIRES_VIEW: 'La modification du profil nécessite aussi le droit de consulter l’organisation.',
+  EMPLOYEE_ACCOUNT_NOT_FOUND: 'Cet employé ne possède pas encore de compte actif.',
 
   // authorization
   ORGANIZATION_ADMIN_REQUIRED: 'Cette action est réservée aux administrateurs de l’organisation.',

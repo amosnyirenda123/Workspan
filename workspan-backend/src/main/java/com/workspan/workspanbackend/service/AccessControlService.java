@@ -142,6 +142,10 @@ public class AccessControlService {
 
     private RoleResponse saveRole(Role role, List<String> permissionKeys) {
         List<String> distinctKeys = permissionKeys.stream().distinct().toList();
+        if (distinctKeys.contains("organization.edit") && !distinctKeys.contains("organization.view"))
+            throw new BadRequestException(ErrorCode.ORGANIZATION_EDIT_REQUIRES_VIEW);
+        if (distinctKeys.contains("task.sprint.manage") && (!distinctKeys.contains("task.view.scrum") || !distinctKeys.contains("task.edit")))
+            throw new BadRequestException(ErrorCode.SPRINT_MANAGE_REQUIRES_TASK_ACCESS);
         if (distinctKeys.stream().anyMatch(key -> !allowedAtScope(role.getScope(), key)))
             throw new BadRequestException(ErrorCode.PERMISSION_SCOPE_MISMATCH);
         if ((distinctKeys.contains("gantt.schedule.manage") || distinctKeys.contains("gantt.dependencies.manage")) && !distinctKeys.contains("gantt.view"))

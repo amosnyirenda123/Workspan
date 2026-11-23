@@ -1,9 +1,11 @@
 package com.workspan.workspanbackend.service;
 
 import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.ConflictException;
 import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.entity.Organization;
 import com.workspan.workspanbackend.dto.OrganizationResponse;
+import com.workspan.workspanbackend.dto.OrganizationUpdateRequest;
 import com.workspan.workspanbackend.mapper.OrganizationMapper;
 import com.workspan.workspanbackend.repository.*;
 import com.workspan.workspanbackend.repository.OrganizationRepository;
@@ -47,6 +49,24 @@ public class OrganizationService {
         if (!id.equals(organizationId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
         return findById(id);
     }
+
+    @Transactional
+    public OrganizationResponse update(UUID id, UUID organizationId, OrganizationUpdateRequest request) {
+        if (!id.equals(organizationId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
+        Organization organization = organizations.findById(id)
+                .orElseThrow(() -> new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND));
+        String name = request.name().trim();
+        if (organizations.existsByNameIgnoreCaseAndIdNot(name, id))
+            throw new ConflictException(ErrorCode.ORGANIZATION_NAME_TAKEN);
+        organization.setName(name);
+        organization.setDescription(blankToNull(request.description()));
+        organization.setWebsite(blankToNull(request.website()));
+        organization.setContactEmail(blankToNull(request.contactEmail()));
+        organization.setPhone(blankToNull(request.phone()));
+        return response(organizations.save(organization));
+    }
+
+    private String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
 
     private OrganizationResponse response(Organization organization) {
         UUID id = organization.getId();

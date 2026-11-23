@@ -24,6 +24,8 @@ export function AnalyticsManager({ canViewEmployees, canViewResourcePools }: { c
   const [partial, setPartial] = useState(false)
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   useEffect(() => {
     let active = true
@@ -51,9 +53,16 @@ export function AnalyticsManager({ canViewEmployees, canViewResourcePools }: { c
   const metrics = useMemo(() => {
     if (!data) return null
     const today = new Date().toISOString().slice(0, 10)
+    const inRange = (createdAt: string) => {
+      const date = createdAt.slice(0, 10)
+      return (!fromDate || date >= fromDate) && (!toDate || date <= toDate)
+    }
+    const projects = data.projects.filter(project => inRange(project.createdAt))
+    const projectIds = new Set(projects.map(project => project.id))
+    const tasks = data.tasks.filter(task => inRange(task.createdAt) && projectIds.has(task.projectId))
     const projectState = (project: Project) => project.endDate ? 'Terminés' : !project.startDate && project.baselineStart && today < project.baselineStart ? 'À venir' : 'En cours'
-    const projectStates = ['En cours', 'À venir', 'Terminés'].map(label => ({ label, value: data.projects.filter(project => projectState(project) === label).length }))
-    const taskStatuses = (['TODO', 'STARTED', 'BLOCKED', 'DONE'] as TaskStatus[]).map(status => ({ label: taskLabels[status], value: data.tasks.filter(task => task.status === status).length }))
+    const projectStates = ['En cours', 'À venir', 'Terminés'].map(label => ({ label, value: projects.filter(project => projectState(project) === label).length }))
+    const taskStatuses = (['TODO', 'STARTED', 'BLOCKED', 'DONE'] as TaskStatus[]).map(status => ({ label: taskLabels[status], value: tasks.filter(task => task.status === status).length }))
     const employeeCounts = data.spaces.map(space => ({ label: space.name, value: data.employees.filter(employee => employee.spaceId === space.id).length })).sort((a, b) => b.value - a.value)
     const resourceCounts = [
       { label: 'Employés', value: data.pools.filter(resource => resource.type === 'HUMAN').length },
@@ -72,23 +81,38 @@ export function AnalyticsManager({ canViewEmployees, canViewResourcePools }: { c
     const budgetCurrencies = [...new Set([...committedBySpace.values(), ...committedByProject.values()].flatMap(currencyMap => [...currencyMap.keys()]))].sort()
     const spaceBudgets = budgetCurrencies.map(currency => ({ currency, items: data.spaces.map(space => ({ label: space.name, value: committedBySpace.get(space.id)?.get(currency) ?? 0 })).filter(item => item.value > 0).sort((a, b) => b.value - a.value) }))
     const projectBudgets = budgetCurrencies.map(currency => ({ currency, items: data.projects.map(project => ({ label: project.name, value: committedByProject.get(project.id)?.get(currency) ?? 0 })).filter(item => item.value > 0).sort((a, b) => b.value - a.value) }))
-    const spaceProjects = data.spaces.map(space => ({ label: space.name, value: data.projects.filter(project => project.spaceId === space.id).length })).sort((a, b) => b.value - a.value)
+    const spaceProjects = data.spaces.map(space => ({ label: space.name, value: projects.filter(project => project.spaceId === space.id).length })).sort((a, b) => b.value - a.value)
     const activeEmployees = data.employees.filter(employee => employee.status.toUpperCase() === 'AVAILABLE').length
     const availableBySpace = budgetCurrencies.map(currency => ({ currency, items: data.spaces.map(space => ({
       label: space.name,
       value: data.pools.filter(resource => resource.spaceId === space.id && resource.type === 'BUDGET' && (resource.currency ?? 'Sans devise') === currency).reduce((sum, resource) => sum + (resource.availableAmount ?? 0), 0),
     })).filter(item => item.value > 0).sort((a, b) => b.value - a.value) }))
-    return { projectStates, taskStatuses, employeeCounts, resourceCounts, spaceBudgets, projectBudgets, spaceProjects, budgetCurrencies, availableBySpace, activeEmployees }
-  }, [data])
+    return { projectStates, taskStatuses, employeeCounts, resourceCounts, spaceBudgets, projectBudgets, spaceProjects, budgetCurrencies, availableBySpace, activeEmployees, projects, tasks }
+  }, [data, fromDate, toDate])
+
+  function exportCsv() {
+    if (!data || !metrics) return
+    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
+    const rows = [
+      ['Type', 'Espace', 'Projet', 'Nom', 'Statut', 'Créé le'],
+      ...metrics.projects.map(project => ['Projet', data.spaces.find(space => space.id === project.spaceId)?.name ?? '', project.name, project.name, project.endDate ? 'Terminé' : 'En cours', project.createdAt]),
+      ...metrics.tasks.map(task => ['Tâche', '', data.projects.find(project => project.id === task.projectId)?.name ?? '', task.name, task.status, task.createdAt]),
+    ]
+    const csv = '\uFEFF' + rows.map(row => row.map(quote).join(';')).join('\r\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url; link.download = 'workspan-analytics.csv'; link.click(); URL.revokeObjectURL(url)
+  }
 
   if (loading) return <div className="empty-state">Chargement des analyses…</div>
   if (error) return <div className="alert" role="alert">{error}</div>
   if (!data || !metrics) return null
 
   return <div className="analytics-dashboard">
-    <div className="analytics-heading"><div><p className="eyebrow">VUE D’ENSEMBLE</p><h2>Analyses de l’espace de travail</h2><p>Indicateurs calculés à partir des éléments auxquels vous avez accès.</p></div><button type="button" className="secondary-button" onClick={() => setRefreshKey(current => current + 1)}>Actualiser</button></div>
+    <div className="analytics-heading"><div><p className="eyebrow">VUE D’ENSEMBLE</p><h2>Analyses de l’espace de travail</h2><p>Indicateurs calculés à partir des éléments auxquels vous avez accès.</p></div><div className="analytics-actions"><button type="button" className="secondary-button" onClick={exportCsv}>Exporter CSV</button><button type="button" className="secondary-button" onClick={() => setRefreshKey(current => current + 1)}>Actualiser</button></div></div>
+    <div className="analytics-filters"><label>Date de création, du <input type="date" value={fromDate} max={toDate || undefined} onChange={event => setFromDate(event.target.value)} /></label><label>au <input type="date" min={fromDate || undefined} value={toDate} onChange={event => setToDate(event.target.value)} /></label><button type="button" className="text-button" onClick={() => { setFromDate(''); setToDate('') }}>Effacer les dates</button><small>Le filtre s’applique aux projets et tâches créés pendant la période.</small></div>
     {partial && <p className="analytics-notice">Certains pools ou affectations de ressources ne sont pas accessibles avec vos permissions; les graphiques correspondants peuvent être incomplets.</p>}
-    <div className="analytics-kpis"><article><span>Employés visibles</span><strong>{data.employeesAccessible ? number(data.employees.length) : '—'}</strong><small>{data.employeesAccessible ? `${number(metrics.activeEmployees)} actifs` : 'Permission requise'}</small></article><article><span>Espaces accessibles</span><strong>{number(data.spaces.length)}</strong><small>{number(data.projects.length)} projets</small></article><article><span>Tâches</span><strong>{number(data.tasks.length)}</strong><small>{number(data.tasks.filter(task => task.status === 'DONE').length)} terminées</small></article><article><span>Ressources du pool</span><strong>{data.poolsAccessible ? partial ? `${number(data.pools.length)}+` : number(data.pools.length) : '—'}</strong><small>{data.poolsAccessible ? 'Dans les espaces accessibles' : 'Permission requise'}</small></article></div>
+    <div className="analytics-kpis"><article><span>Employés visibles</span><strong>{data.employeesAccessible ? number(data.employees.length) : '—'}</strong><small>{data.employeesAccessible ? `${number(metrics.activeEmployees)} actifs` : 'Permission requise'}</small></article><article><span>Espaces accessibles</span><strong>{number(data.spaces.length)}</strong><small>{number(metrics.projects.length)} projets dans la période</small></article><article><span>Tâches</span><strong>{number(metrics.tasks.length)}</strong><small>{number(metrics.tasks.filter(task => task.status === 'DONE').length)} terminées</small></article><article><span>Ressources du pool</span><strong>{data.poolsAccessible ? partial ? `${number(data.pools.length)}+` : number(data.pools.length) : '—'}</strong><small>{data.poolsAccessible ? 'Dans les espaces accessibles' : 'Permission requise'}</small></article></div>
     <div className="analytics-grid">
       {data.employeesAccessible ? <BarChart title="Effectif par espace" items={metrics.employeeCounts} format={value => `${number(value)} pers.`} /> : <section className="analytics-card"><h3>Effectif par espace</h3><p className="analytics-empty">La permission « Voir les employés » est requise pour ces données.</p></section>}
       <BarChart title="Projets par espace" items={metrics.spaceProjects} />

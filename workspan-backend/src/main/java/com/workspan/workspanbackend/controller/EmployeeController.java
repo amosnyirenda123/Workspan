@@ -5,6 +5,7 @@ import com.workspan.workspanbackend.exception.ConflictException;
 import com.workspan.workspanbackend.exception.ErrorCode;
 import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.EmployeeRequest;
+import com.workspan.workspanbackend.dto.EmployeeAccountStatusRequest;
 import com.workspan.workspanbackend.dto.EmployeeInviteRequest;
 import com.workspan.workspanbackend.dto.EmployeeEmailRequest;
 import com.workspan.workspanbackend.dto.EmployeeImportRequest;
@@ -77,6 +78,15 @@ public class EmployeeController {
                 .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
         access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
         return employees.updateEmail(organizationId, employeeId, request);
+    }
+
+    @PatchMapping("/{employeeId}/account-status")
+    public EmployeeResponse setAccountStatus(@PathVariable java.util.UUID employeeId,
+            @Valid @RequestBody EmployeeAccountStatusRequest request, HttpSession session) {
+        java.util.UUID organizationId = access.organizationId(session);
+        EmployeeResponse employee = findEmployee(organizationId, employeeId);
+        access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
+        return employees.setAccountEnabled(organizationId, employeeId, request.enabled());
     }
 
     @PostMapping("/credentials/send-all")

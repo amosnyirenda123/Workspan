@@ -3,11 +3,13 @@ import { getApiErrorMessage } from '../../api/http'
 import { projectService } from '../../api/projectService'
 import { taskService } from '../../api/taskService'
 import { TaskResourcesPanel } from './TaskResourcesPanel'
+import { ScrumPlanning } from './ScrumPlanning'
+import { TaskCommentsPanel } from './TaskCommentsPanel'
 import type { Project, Task, TaskRequest, TaskStatus } from '../../api/types'
 import type { EffectiveAccess } from '../../api/types'
 import { canProject } from '../../api/accessPermissions'
 
-const emptyForm: TaskRequest = { projectId: '', name: '', status: 'TODO', baselineStart: '', baselineEnd: '', startDate: '', endDate: '', progress: 0 }
+const emptyForm: TaskRequest = { projectId: '', name: '', status: 'TODO', priority: 'NORMAL', estimatePoints: null, dueDate: '', baselineStart: '', baselineEnd: '', startDate: '', endDate: '', progress: 0 }
 const formatDate = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('fr-FR') : null
 const statusLabels: Record<TaskStatus, string> = { TODO: 'À faire', STARTED: 'En cours', BLOCKED: 'Bloquée', DONE: 'Terminée' }
 const statusOrder: TaskStatus[] = ['TODO', 'STARTED', 'BLOCKED', 'DONE']
@@ -22,6 +24,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [resourcesTaskId, setResourcesTaskId] = useState<string | null>(null)
+  const [commentsTaskId, setCommentsTaskId] = useState<string | null>(null)
   const [selectedViewMode, setViewMode] = useState<TaskViewMode>('LIST')
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
@@ -39,7 +42,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError('')
     try {
-      const payload: TaskRequest = { ...form, baselineStart: form.baselineStart || null, baselineEnd: form.baselineEnd || null,
+      const payload: TaskRequest = { ...form, baselineStart: form.baselineStart || null, baselineEnd: form.baselineEnd || null, dueDate: form.dueDate || null,
         startDate: form.startDate || null, endDate: form.endDate || null, progress: form.progress ?? 0 }
       const saved = editingId ? await taskService.update(editingId, payload) : await taskService.create(payload)
       setTasks(current => editingId ? current.map(item => item.id === saved.id ? saved : item) : [...current, saved].sort((a, b) => a.name.localeCompare(b.name)))
@@ -50,7 +53,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   }
 
   function edit(task: Task) {
-    setForm({ projectId: task.projectId, name: task.name, status: task.status, baselineStart: task.baselineStart ?? '', baselineEnd: task.baselineEnd ?? '', startDate: task.startDate ?? '', endDate: task.endDate ?? '', progress: task.progress })
+    setForm({ projectId: task.projectId, name: task.name, status: task.status, priority: task.priority, estimatePoints: task.estimatePoints, dueDate: task.dueDate ?? '', baselineStart: task.baselineStart ?? '', baselineEnd: task.baselineEnd ?? '', startDate: task.startDate ?? '', endDate: task.endDate ?? '', progress: task.progress })
     setEditingId(task.id); setShowTaskForm(true); setError('')
   }
 
@@ -71,8 +74,9 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const canEdit = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.edit') }
   const canDelete = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.delete') }
   const canManageResources = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'project.resources.manage') }
+  const canComment = (task: Task) => { const project = projects.find(item => item.id === task.projectId); return !!project && canProject(access, project.id, project.spaceId, 'task.comment') }
   const showForm = projects.some(project => canProject(access, project.id, project.spaceId, 'task.create')) || (!!editingId && tasks.some(task => task.id === editingId && canEdit(task)))
-  const listPermissionKeys = ['task.view', 'task.edit', 'task.delete', 'project.resources.manage']
+  const listPermissionKeys = ['task.view', 'task.edit', 'task.delete', 'task.comment', 'project.resources.manage']
   const canViewList = projects.some(project => listPermissionKeys.some(key => canProject(access, project.id, project.spaceId, key)))
   const canViewKanban = projects.some(project => canProject(access, project.id, project.spaceId, 'task.view.kanban'))
   const canViewScrum = projects.some(project => canProject(access, project.id, project.spaceId, 'task.view.scrum'))
@@ -95,7 +99,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
     if (!canEdit(task) || task.status === status) return
     setSaving(true); setError('')
     try {
-      const saved = await taskService.update(task.id, { projectId: task.projectId, name: task.name, status, baselineStart: task.baselineStart, baselineEnd: task.baselineEnd, startDate: task.startDate, endDate: task.endDate, progress: task.progress })
+      const saved = await taskService.update(task.id, { projectId: task.projectId, name: task.name, status, priority: task.priority, estimatePoints: task.estimatePoints, dueDate: task.dueDate, baselineStart: task.baselineStart, baselineEnd: task.baselineEnd, startDate: task.startDate, endDate: task.endDate, progress: task.progress })
       setTasks(current => current.map(item => item.id === saved.id ? saved : item)); onChange()
     } catch (cause) { setError(getApiErrorMessage(cause, 'Impossible de modifier le statut de cette tâche.')) }
     finally { setSaving(false) }
@@ -106,6 +110,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
       <div className="task-card-topline"><span className="task-card-grip" aria-hidden="true">⠿</span><span className={`task-card-priority task-card-priority-${task.status.toLowerCase()}`}>{statusLabels[task.status]}</span></div>
       <strong>{task.name}</strong><small className="task-card-project">{projectName(task.projectId)}</small>
       {(task.baselineStart || task.baselineEnd) && <small className="task-card-dates">Planifié : {formatDate(task.baselineStart) ?? '—'} → {formatDate(task.baselineEnd) ?? '—'}</small>}
+      {canComment(task) && <button type="button" className="task-card-edit" onClick={() => setCommentsTaskId(task.id)}>Discussion</button>}
       {canEdit(task) && <div className="task-board-card-actions"><button type="button" className="task-card-edit" disabled={saving} onClick={() => edit(task)}>Modifier</button><select className="task-card-status-select" aria-label={`Changer le statut de ${task.name}`} disabled={saving} value={task.status} onChange={event => void changeTaskStatus(task, event.target.value as TaskStatus)}>{statusOrder.map(status => <option key={status} value={status}>{statusLabels[status]}</option>)}</select>{viewMode === 'SCRUM' && task.status === 'TODO' && <button type="button" className="task-card-start" disabled={saving} onClick={() => void changeTaskStatus(task, 'STARTED')}>Ajouter au sprint</button>}</div>}
     </article>
   }
@@ -118,6 +123,9 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
         <div className="form-field full-width"><label htmlFor="task-project">Projet <span>*</span></label><select id="task-project" required value={form.projectId} onChange={event => setForm({ ...form, projectId: event.target.value })}><option value="">Choisir un projet</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
         <div className="form-field full-width"><label htmlFor="task-name">Nom de la tâche <span>*</span></label><input id="task-name" required maxLength={160} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></div>
         <div className="form-field full-width"><label htmlFor="task-status">Statut</label><select id="task-status" value={form.status} onChange={event => setForm({ ...form, status: event.target.value as TaskStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+        <div className="form-field"><label htmlFor="task-priority">Priorité</label><select id="task-priority" value={form.priority} onChange={event => setForm({ ...form, priority: event.target.value as TaskRequest['priority'] })}><option value="LOW">Basse</option><option value="NORMAL">Normale</option><option value="HIGH">Haute</option><option value="URGENT">Urgente</option></select></div>
+        <div className="form-field"><label htmlFor="task-estimate">Estimation (points)</label><input id="task-estimate" type="number" min="0" max="1000" value={form.estimatePoints ?? ''} onChange={event => setForm({ ...form, estimatePoints: event.target.value === '' ? null : Number(event.target.value) })} /></div>
+        <div className="form-field"><label htmlFor="task-due-date">Échéance</label><input id="task-due-date" type="date" value={form.dueDate ?? ''} onChange={event => setForm({ ...form, dueDate: event.target.value })} /></div>
         <div className="form-field"><label htmlFor="task-planned-start">Début planifié</label><input id="task-planned-start" type="date" min={selectedProject?.baselineStart ?? undefined} max={selectedProject?.baselineEnd ?? undefined} value={form.baselineStart ?? ''} onChange={event => setForm({ ...form, baselineStart: event.target.value })} /></div>
         <div className="form-field"><label htmlFor="task-planned-end">Fin planifiée</label><input id="task-planned-end" type="date" min={form.baselineStart || selectedProject?.baselineStart || undefined} max={selectedProject?.baselineEnd ?? undefined} value={form.baselineEnd ?? ''} onChange={event => setForm({ ...form, baselineEnd: event.target.value })} /></div>
         {form.status !== 'TODO' && <div className="form-field"><label htmlFor="task-actual-start">Début réel</label><input id="task-actual-start" type="date" max={today} value={form.startDate ?? ''} onChange={event => setForm({ ...form, startDate: event.target.value })} /><small className="field-hint">Vide : aujourd’hui au passage « En cours ».</small></div>}
@@ -128,15 +136,13 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
       <div className="form-actions"><button className="primary-button" aria-busy={saving} disabled={saving || projects.length === 0 || (!editingId && !canCreate(form.projectId))}>{saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Créer la tâche'}</button><button type="button" className="secondary-button" onClick={() => { setShowTaskForm(false); setEditingId(null); setForm(emptyForm) }}>Annuler</button></div></form>
     </section></div>}
     {viewMode === 'LIST' && canViewList && <section className="crud-list-panel" aria-live="polite">
-      {loading ? <div className="empty-state">Chargement des tâches…</div> : tasksForView.length ? tasksForView.map(task => <article className="crud-row" key={task.id}><div className="crud-symbol green">T</div><div className="crud-row-main"><strong>{task.name}</strong><small>{projectName(task.projectId)} · {statusLabels[task.status]}{task.status === 'STARTED' || task.status === 'BLOCKED' ? ` (${task.progress} %)` : ''}{task.baselineStart || task.baselineEnd ? ` · Planifié : ${formatDate(task.baselineStart) ?? '?'} → ${formatDate(task.baselineEnd) ?? '?'}` : ''}{task.startDate ? ` · Réel : ${formatDate(task.startDate)} → ${formatDate(task.endDate) ?? 'en cours'}` : ''}</small></div><div className="crud-actions">{canEdit(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(task)}>Modifier</button>}{canManageResources(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesTaskId(current => current === task.id ? null : task.id)}>Ressources</button>}{canDelete(task) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(task)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucune tâche</strong><p>Choisissez un projet pour créer votre première tâche.</p></div>}
+      {loading ? <div className="empty-state">Chargement des tâches…</div> : tasksForView.length ? tasksForView.map(task => <article className="crud-row" key={task.id}><div className="crud-symbol green">T</div><div className="crud-row-main"><strong>{task.name}</strong><small>{projectName(task.projectId)} · {statusLabels[task.status]}{task.status === 'STARTED' || task.status === 'BLOCKED' ? ` (${task.progress} %)` : ''} · Priorité {task.priority}{task.estimatePoints != null ? ` · ${task.estimatePoints} pts` : ''}{task.dueDate ? ` · Échéance ${formatDate(task.dueDate)}` : ''}{task.baselineStart || task.baselineEnd ? ` · Planifié : ${formatDate(task.baselineStart) ?? '?'} → ${formatDate(task.baselineEnd) ?? '?'}` : ''}{task.startDate ? ` · Réel : ${formatDate(task.startDate)} → ${formatDate(task.endDate) ?? 'en cours'}` : ''}</small></div><div className="crud-actions">{canComment(task) && <button type="button" className="secondary-button" onClick={() => setCommentsTaskId(task.id)}>Discussion</button>}{canEdit(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => edit(task)}>Modifier</button>}{canManageResources(task) && <button type="button" className="secondary-button" disabled={saving} onClick={() => setResourcesTaskId(current => current === task.id ? null : task.id)}>Ressources</button>}{canDelete(task) && <button type="button" className="danger-button" disabled={saving} onClick={() => void remove(task)}>Supprimer</button>}</div></article>) : <div className="empty-state"><strong>Aucune tâche</strong><p>Choisissez un projet pour créer votre première tâche.</p></div>}
     </section>}
     {viewMode === 'KANBAN' && canViewKanban && <section className="task-board task-kanban-board" aria-label="Tableau Kanban">
       {loading ? <div className="empty-state">Chargement...</div> : statusOrder.map(status => { const columnTasks = tasksForView.filter(task => task.status === status); return <section className={`task-board-column task-column-${status.toLowerCase()} ${dragOverStatus === status ? 'task-column-over' : ''}`} key={status} onDragOver={event => { if (draggedTaskId) { event.preventDefault(); setDragOverStatus(status) } }} onDragLeave={() => setDragOverStatus(current => current === status ? null : current)} onDrop={event => { event.preventDefault(); const task = tasks.find(item => item.id === draggedTaskId); setDraggedTaskId(null); setDragOverStatus(null); if (task) void changeTaskStatus(task, status) }}><header><div><span className="task-column-dot"/><strong>{statusLabels[status]}</strong></div><span>{columnTasks.length}</span></header><div className="task-column-cards">{columnTasks.length ? columnTasks.map(renderBoardCard) : <p className="task-board-empty">Déposez une tâche ici</p>}</div></section> })}
     </section>}
-    {viewMode === 'SCRUM' && canViewScrum && <section className="task-scrum-view" aria-label="Vue Scrum">
-      <div className={`task-scrum-backlog ${dragOverStatus === 'TODO' ? 'task-column-over' : ''}`} onDragOver={event => { if (draggedTaskId) { event.preventDefault(); setDragOverStatus('TODO') } }} onDragLeave={() => setDragOverStatus(current => current === 'TODO' ? null : current)} onDrop={event => { event.preventDefault(); const task = tasks.find(item => item.id === draggedTaskId); setDraggedTaskId(null); setDragOverStatus(null); if (task) void changeTaskStatus(task, 'TODO') }}><header><div><h3>Backlog</h3><p>Les tâches à faire attendent le sprint.</p></div><span>{tasksForView.filter(task => task.status === 'TODO').length}</span></header>{loading ? <div className="empty-state">Chargement...</div> : tasksForView.filter(task => task.status === 'TODO').map(renderBoardCard)}</div>
-      <div className="task-scrum-board"><header className="task-scrum-board-heading"><div><span className="task-workspace-eyebrow">ITÉRATION ACTUELLE</span><h3>Sprint en cours</h3><p>Déplacez les éléments du backlog dans le sprint, puis faites-les avancer.</p></div><span className="task-sprint-count">{tasksForView.filter(task => task.status !== 'TODO').length} éléments</span></header><div className="task-board task-scrum-columns">{statusOrder.filter(status => status !== 'TODO').map(status => { const columnTasks = tasksForView.filter(task => task.status === status); return <section className={`task-board-column task-column-${status.toLowerCase()} ${dragOverStatus === status ? 'task-column-over' : ''}`} key={status} onDragOver={event => { if (draggedTaskId) { event.preventDefault(); setDragOverStatus(status) } }} onDragLeave={() => setDragOverStatus(current => current === status ? null : current)} onDrop={event => { event.preventDefault(); const task = tasks.find(item => item.id === draggedTaskId); setDraggedTaskId(null); setDragOverStatus(null); if (task) void changeTaskStatus(task, status) }}><header><div><span className="task-column-dot"/><strong>{statusLabels[status]}</strong></div><span>{columnTasks.length}</span></header><div className="task-column-cards">{columnTasks.length ? columnTasks.map(renderBoardCard) : <p className="task-board-empty">Déposez une tâche ici</p>}</div></section> })}</div></div>
-    </section>}
+    {viewMode === 'SCRUM' && canViewScrum && <ScrumPlanning projects={projects} tasks={tasks.filter(task => canViewTask(task, 'SCRUM'))} access={access} onTasksChanged={() => { void taskService.list().then(setTasks).catch(cause => setError(getApiErrorMessage(cause, 'Impossible de recharger les tâches.'))); onChange() }} />}
+    {commentsTaskId && tasks.find(task => task.id === commentsTaskId && canComment(task)) && <TaskCommentsPanel task={tasks.find(task => task.id === commentsTaskId)!} canComment={canComment(tasks.find(task => task.id === commentsTaskId)!)} onClose={() => setCommentsTaskId(null)} />}
     {resourcesTaskId && tasks.find(task => task.id === resourcesTaskId && canManageResources(task)) && projects.find(project => project.id === tasks.find(task => task.id === resourcesTaskId)?.projectId) && <TaskResourcesPanel key={`${resourcesTaskId}-${tasks.find(task => task.id === resourcesTaskId)?.status}-${tasks.find(task => task.id === resourcesTaskId)?.startDate}-${tasks.find(task => task.id === resourcesTaskId)?.endDate}`} task={tasks.find(task => task.id === resourcesTaskId)!} project={projects.find(project => project.id === tasks.find(task => task.id === resourcesTaskId)?.projectId)!} onClose={() => setResourcesTaskId(null)} />}
   </div>
 }

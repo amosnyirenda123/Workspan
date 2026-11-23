@@ -14,6 +14,7 @@ import com.workspan.workspanbackend.entity.TaskStatus;
 import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.repository.TaskDependencyRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
+import com.workspan.workspanbackend.repository.TaskCommentRepository;
 import com.workspan.workspanbackend.repository.TaskResourceAllocationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,11 +40,14 @@ public class TaskService {
     private final TaskResourceService taskResourceService;
     private final TaskDependencyRepository dependencies;
     private final ProjectScheduleSync projectScheduleSync;
+    private final TaskCommentRepository comments;
 
     public TaskService(TaskRepository tasks, ProjectRepository projects, TaskResourceAllocationRepository taskResourceAllocations,
-                       TaskResourceService taskResourceService, TaskDependencyRepository dependencies, ProjectScheduleSync projectScheduleSync) {
+                       TaskResourceService taskResourceService, TaskDependencyRepository dependencies, ProjectScheduleSync projectScheduleSync,
+                       TaskCommentRepository comments) {
         this.tasks = tasks; this.projects = projects; this.taskResourceAllocations = taskResourceAllocations;
         this.taskResourceService = taskResourceService; this.dependencies = dependencies; this.projectScheduleSync = projectScheduleSync;
+        this.comments = comments;
     }
 
     public List<TaskResponse> findAll(UUID organizationId) {
@@ -59,6 +63,8 @@ public class TaskService {
         validateWithinProject(schedule.plannedStart(), schedule.plannedEnd(), project);
         Task task = new Task(project, request.name().trim());
         task.setStatus(request.status());
+        task.setPriority(request.priority() == null ? com.workspan.workspanbackend.entity.TaskPriority.NORMAL : request.priority());
+        task.setEstimatePoints(request.estimatePoints()); task.setDueDate(request.dueDate());
         schedule.applyTo(task);
         Task saved = tasks.save(task);
         projectScheduleSync.refreshActualDates(project);
@@ -77,9 +83,12 @@ public class TaskService {
         validateWithinProject(schedule.plannedStart(), schedule.plannedEnd(), targetProject);
         taskResourceService.validateSchedule(task, targetProject, request.status(), schedule.occupancyStart(), schedule.occupancyEnd());
         if (moving) taskResourceService.moveAssignmentsToProjectPool(task, targetProject);
+        if (moving) task.setSprint(null);
         task.setProject(targetProject);
         task.setName(request.name().trim());
         task.setStatus(request.status());
+        if (request.priority() != null) task.setPriority(request.priority());
+        task.setEstimatePoints(request.estimatePoints()); task.setDueDate(request.dueDate());
         schedule.applyTo(task);
         Task saved = tasks.save(task);
         projectScheduleSync.refreshActualDates(targetProject);
@@ -119,6 +128,7 @@ public class TaskService {
                 .anyMatch(allocation -> allocation.getProjectResourceAllocation().getResource() instanceof BudgetResource))
             throw new ConflictException(ErrorCode.TASK_BUDGET_COMMITTED);
         dependencies.deleteAllInvolvingTask(task.getId());
+        comments.deleteAllByTaskId(task.getId());
         taskResourceAllocations.deleteAllByTaskId(task.getId());
         tasks.delete(task);
         tasks.flush();
@@ -176,7 +186,8 @@ public class TaskService {
 
 
     TaskResponse response(Task task) {
-        return new TaskResponse(task.getId(), task.getProject().getId(), task.getName(), task.getStatus(),
+        return new TaskResponse(task.getId(), task.getProject().getId(), task.getSprint() == null ? null : task.getSprint().getId(), task.getName(), task.getStatus(),
+                task.getPriority(), task.getEstimatePoints(), task.getDueDate(),
                 task.getBaselineStart(), task.getBaselineEnd(), task.getStartDate(), task.getEndDate(), task.getProgress(), task.getCreatedAt());
     }
 

@@ -45,6 +45,14 @@ public enum ErrorCode {
     PASSWORD_REUSED(HttpStatus.BAD_REQUEST, "Choose a different password"),
     ACCOUNT_EMAIL_TAKEN(HttpStatus.CONFLICT, "An account with this email already exists"),
     ORGANIZATION_NAME_TAKEN(HttpStatus.CONFLICT, "An organization with this name already exists"),
+    SPRINT_NAME_TAKEN(HttpStatus.CONFLICT, "A sprint with this name already exists in the project"),
+    SPRINT_ACTIVE_EXISTS(HttpStatus.CONFLICT, "A project can only have one active sprint"),
+    SPRINT_DATES_INVALID(HttpStatus.BAD_REQUEST, "Sprint end date must not be before its start date"),
+    SPRINT_TASK_PROJECT_MISMATCH(HttpStatus.BAD_REQUEST, "The task must belong to the sprint's project"),
+    PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "This password reset link is invalid or has expired"),
+    EMPLOYEE_ACCOUNT_NOT_FOUND(HttpStatus.CONFLICT, "This employee does not have a user account yet"),
+    ORGANIZATION_EDIT_REQUIRES_VIEW(HttpStatus.BAD_REQUEST, "Organization profile editing requires organization.view"),
+    SPRINT_MANAGE_REQUIRES_TASK_ACCESS(HttpStatus.BAD_REQUEST, "Sprint management requires Scrum view and task edit permissions"),
 
     // ---------------------------------------------------------------- authorization
     ORGANIZATION_ADMIN_REQUIRED(HttpStatus.FORBIDDEN, "Organization administrator access required"),

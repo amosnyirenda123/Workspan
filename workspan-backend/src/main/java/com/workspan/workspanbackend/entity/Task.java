@@ -12,6 +12,9 @@ public class Task extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sprint_id")
+    private Sprint sprint;
     @NotBlank
     @Size(max = 160)
     @Column(nullable = false, length = 160)
@@ -19,6 +22,12 @@ public class Task extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
     private TaskStatus status = TaskStatus.TODO;
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16, columnDefinition = "varchar(16) default 'NORMAL'")
+    private TaskPriority priority = TaskPriority.NORMAL;
+    @Column(name = "estimate_points")
+    private Integer estimatePoints;
+    @Column(name = "due_date")
+    private LocalDate dueDate;
     private LocalDate baselineStart;
     private LocalDate baselineEnd;
     private LocalDate startDate;
@@ -44,6 +53,9 @@ public class Task extends BaseEntity {
         project = v;
     }
 
+    public Sprint getSprint() { return sprint; }
+    public void setSprint(Sprint sprint) { this.sprint = sprint; }
+
     public String getName() {
         return name;
     }
@@ -59,6 +71,13 @@ public class Task extends BaseEntity {
     public void setStatus(TaskStatus v) {
         status = v;
     }
+
+    public TaskPriority getPriority() { return priority; }
+    public void setPriority(TaskPriority priority) { this.priority = priority; }
+    public Integer getEstimatePoints() { return estimatePoints; }
+    public void setEstimatePoints(Integer estimatePoints) { this.estimatePoints = estimatePoints; }
+    public LocalDate getDueDate() { return dueDate; }
+    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
 
     public LocalDate getBaselineStart() {
         return baselineStart;

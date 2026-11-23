@@ -10,4 +10,5 @@ export const employeeService = {
   async invite(id: string, roleId: string, roleScope: 'ORGANIZATION' | 'SPACE'): Promise<CredentialDeliveryResult> { return (await apiClient.post<CredentialDeliveryResult>(`/employees/${encodeURIComponent(id)}/invite`, { roleId, roleScope })).data },
   async sendAllCredentials(): Promise<CredentialBatchResponse> { return (await apiClient.post<CredentialBatchResponse>('/employees/credentials/send-all')).data },
   async updateEmail(id: string, email: string): Promise<Employee> { return (await apiClient.patch<Employee>(`/employees/${encodeURIComponent(id)}/email`, { email })).data },
+  async setAccountEnabled(id: string, enabled: boolean): Promise<Employee> { return (await apiClient.patch<Employee>(`/employees/${encodeURIComponent(id)}/account-status`, { enabled })).data },
 }

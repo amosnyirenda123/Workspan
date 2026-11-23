@@ -12,4 +12,8 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     List<Task> findAllByProjectSpaceOrganizationIdOrderByNameAsc(UUID organizationId);
     Optional<Task> findByIdAndProjectSpaceOrganizationId(UUID id, UUID organizationId);
     List<Task> findAllByProjectIdOrderByNameAsc(UUID projectId);
+    Optional<Task> findByIdAndProjectId(UUID id, UUID projectId);
+    long countBySprintId(UUID sprintId);
+    long countBySprintIdAndStatus(UUID sprintId, com.workspan.workspanbackend.entity.TaskStatus status);
+    List<Task> findAllBySprintId(UUID sprintId);
 }

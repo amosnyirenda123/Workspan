@@ -19,7 +19,7 @@ export function WorkspaceCrud({ onChange, section, access, canViewAnalyticsEmplo
   const hasProjectRight = (key: string) => canOrganization(access, key) || Object.keys(access?.spacePermissions ?? {}).some(spaceId => canSpace(access, spaceId, key)) || Object.values(access?.projectPermissions ?? {}).some(keys => keys.includes(key))
   const showSpaces = ['space.view', 'space.edit', 'space.delete', 'space.create', 'project.create'].some(hasSpaceRight)
   const showProjects = ['project.view', 'project.edit', 'project.delete', 'project.resources.manage'].some(hasProjectRight) || hasSpaceRight('project.create')
-  const showTasks = ['task.view', 'task.view.kanban', 'task.view.scrum', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'].some(hasProjectRight)
+  const showTasks = ['task.view', 'task.view.kanban', 'task.view.scrum', 'task.comment', 'task.create', 'task.edit', 'task.delete', 'project.resources.manage'].some(hasProjectRight)
   const showResources = hasSpaceRight('resource.pool.view') || hasSpaceRight('resource.pool.manage')
   const showAnalytics = hasSpaceRight('analytics.view') || hasProjectRight('analytics.view')
   const showGantt = hasProjectRight('gantt.view')
