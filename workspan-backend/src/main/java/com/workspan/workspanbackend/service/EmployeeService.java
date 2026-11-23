@@ -1,5 +1,7 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.ApiException;
 import com.workspan.workspanbackend.dto.EmployeeRequest;
 import com.workspan.workspanbackend.dto.EmployeeEmailRequest;
 import com.workspan.workspanbackend.dto.EmployeeImportRequest;
@@ -13,8 +15,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
-import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,11 +51,11 @@ public class EmployeeService {
         List<EmployeeImportRowResult> results = request.employees().stream().map(row -> {
             try {
                 EmployeeResponse created = writer.create(organizationId, row);
-                return new EmployeeImportRowResult(row.rowNumber(), "CREATED", "Employee created", created);
-            } catch (ResponseStatusException exception) {
-                return new EmployeeImportRowResult(row.rowNumber(), "SKIPPED", exception.getReason(), null);
+                return EmployeeImportRowResult.created(row.rowNumber(), created);
+            } catch (ApiException exception) {
+                return EmployeeImportRowResult.skipped(row.rowNumber(), exception.getCode(), exception.getParams());
             } catch (DataIntegrityViolationException exception) {
-                return new EmployeeImportRowResult(row.rowNumber(), "SKIPPED", "An employee with this email already exists", null);
+                return EmployeeImportRowResult.skipped(row.rowNumber(), ErrorCode.EMAIL_ALREADY_IN_USE, java.util.Map.of());
             }
         }).toList();
         int created = (int) results.stream().filter(row -> row.status().equals("CREATED")).count();

@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.CredentialDeliveryResult;
 import com.workspan.workspanbackend.entity.HumanResource;
 import com.workspan.workspanbackend.entity.Organization;
@@ -15,12 +19,10 @@ import com.workspan.workspanbackend.repository.RolePermissionRepository;
 import com.workspan.workspanbackend.repository.SpaceRoleAssignmentRepository;
 import com.workspan.workspanbackend.repository.UserAccountRepository;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -69,34 +71,34 @@ public class EmployeeCredentialSender {
     @Transactional
     public CredentialDeliveryResult send(UUID organizationId, UUID employeeId, boolean forceResend, UUID roleId, RoleScope roleScope) {
         HumanResource employee = employees.findByIdAndSpaceOrganizationId(employeeId, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
         Organization organization = employee.getSpace().getOrganization();
         if (employee.getEmail() == null || employee.getEmail().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Employee email is missing; add an email before sending credentials");
+            throw new BadRequestException(ErrorCode.EMPLOYEE_EMAIL_MISSING);
         }
         String email = employee.getEmail().trim().toLowerCase(Locale.ROOT);
         UserAccount user = employee.getUser();
 
         if (user != null && !forceResend && user.getCredentialEmailSentAt() != null) {
-            return new CredentialDeliveryResult(employee.getId(), email, "SKIPPED", "Credentials were already sent", user.getCredentialEmailSentAt());
+            return CredentialDeliveryResult.skipped(employee.getId(), email, ErrorCode.CREDENTIALS_ALREADY_SENT, user.getCredentialEmailSentAt());
         }
         if (user == null && roleId == null && !forceResend) {
-            return new CredentialDeliveryResult(employee.getId(), email, "SKIPPED", "Choose an access role and invite this employee individually", null);
+            return CredentialDeliveryResult.skipped(employee.getId(), email, ErrorCode.INVITATION_REQUIRED, null);
         }
         if (user == null) {
             if (roleId == null || roleScope == null)
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an access role before inviting this employee");
+                throw new BadRequestException(ErrorCode.INVITATION_ROLE_REQUIRED);
             if (users.existsByEmailIgnoreCase(email)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "This email already belongs to another account");
+                throw new ConflictException(ErrorCode.EMAIL_ALREADY_IN_USE);
             }
             user = new UserAccount();
             user.setOrganization(organization);
             user.setEmail(email);
             user.setDisplayName(employee.getName());
         } else if (roleId != null || roleScope != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This employee already has an account");
+            throw new ConflictException(ErrorCode.EMPLOYEE_ALREADY_HAS_ACCOUNT);
         } else if (!user.getEmail().equalsIgnoreCase(email)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Employee email does not match the linked account");
+            throw new ConflictException(ErrorCode.EMPLOYEE_EMAIL_ACCOUNT_MISMATCH);
         }
 
         String temporaryPassword = generatePassword();
@@ -112,22 +114,22 @@ public class EmployeeCredentialSender {
         Instant sentAt = Instant.now();
         savedUser.setCredentialEmailSentAt(sentAt);
         users.save(savedUser);
-        return new CredentialDeliveryResult(employee.getId(), email, "SENT", "Temporary credentials sent", sentAt);
+        return CredentialDeliveryResult.sent(employee.getId(), email, sentAt);
     }
 
     private void assignRole(UUID organizationId, HumanResource employee, UserAccount user, UUID roleId, RoleScope scope) {
         Role role = roles.findById(roleId)
                 .filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role available for this employee's scope"));
+                .orElseThrow(() -> new BadRequestException(ErrorCode.INVITATION_ROLE_UNAVAILABLE));
         String roleName = role.getName().toUpperCase(Locale.ROOT);
         if (roleName.equals("ADMIN") || roleName.equals("EMPLOYEE") || roleName.startsWith("SPACE_ADMIN - ") || roleName.startsWith("PROJECT_ADMIN - "))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a custom access role");
+            throw new BadRequestException(ErrorCode.INVITATION_ROLE_NOT_CUSTOM);
         if (!rolePermissions.existsByRoleId(role.getId()))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role with at least one permission");
+            throw new BadRequestException(ErrorCode.INVITATION_ROLE_EMPTY);
 
         if (scope == RoleScope.ORGANIZATION) {
             if (role.getScopeSpace() != null || role.getScopeProject() != null)
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an organization role");
+                throw new BadRequestException(ErrorCode.INVITATION_ORGANIZATION_ROLE_REQUIRED);
             if (!organizationAssignments.existsByUserIdAndRoleId(user.getId(), role.getId())) {
                 OrganizationRoleAssignment assignment = new OrganizationRoleAssignment();
                 assignment.setUser(user);
@@ -136,7 +138,7 @@ public class EmployeeCredentialSender {
             }
         } else if (scope == RoleScope.SPACE) {
             if (role.getScopeSpace() == null || !role.getScopeSpace().getId().equals(employee.getSpace().getId()) || role.getScopeProject() != null)
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a role for the employee's space");
+                throw new BadRequestException(ErrorCode.INVITATION_SPACE_ROLE_REQUIRED);
             if (spaceAssignments.findByUserIdAndRoleIdAndSpaceId(user.getId(), role.getId(), employee.getSpace().getId()).isEmpty()) {
                 SpaceRoleAssignment assignment = new SpaceRoleAssignment();
                 assignment.setUser(user);
@@ -145,7 +147,7 @@ public class EmployeeCredentialSender {
                 spaceAssignments.save(assignment);
             }
         } else {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project roles cannot be assigned during employee invitations");
+            throw new BadRequestException(ErrorCode.INVITATION_PROJECT_ROLE_FORBIDDEN);
         }
     }
 

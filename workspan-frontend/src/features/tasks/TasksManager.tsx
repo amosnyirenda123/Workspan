@@ -22,7 +22,7 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [resourcesTaskId, setResourcesTaskId] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<TaskViewMode>('LIST')
+  const [selectedViewMode, setViewMode] = useState<TaskViewMode>('LIST')
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null)
@@ -79,11 +79,10 @@ export function TasksManager({ onChange, access }: { onChange: () => void; acces
   const taskViews: { id: TaskViewMode; label: string; enabled: boolean }[] = [
     { id: 'LIST', label: 'Liste', enabled: canViewList }, { id: 'KANBAN', label: 'Kanban', enabled: canViewKanban }, { id: 'SCRUM', label: 'Scrum', enabled: canViewScrum },
   ]
-  useEffect(() => {
-    const available = viewMode === 'LIST' ? canViewList : viewMode === 'KANBAN' ? canViewKanban : canViewScrum
-    if (available) return
-    if (canViewList) setViewMode('LIST'); else if (canViewKanban) setViewMode('KANBAN'); else if (canViewScrum) setViewMode('SCRUM')
-  }, [canViewList, canViewKanban, canViewScrum, viewMode])
+  // A view the user cannot open falls back to the first one they can.
+  const selectedViewAvailable = selectedViewMode === 'LIST' ? canViewList : selectedViewMode === 'KANBAN' ? canViewKanban : canViewScrum
+  const viewMode: TaskViewMode = selectedViewAvailable ? selectedViewMode
+    : canViewList ? 'LIST' : canViewKanban ? 'KANBAN' : canViewScrum ? 'SCRUM' : selectedViewMode
   const canViewTask = (task: Task, mode = viewMode) => {
     const project = projects.find(item => item.id === task.projectId)
     if (!project) return false

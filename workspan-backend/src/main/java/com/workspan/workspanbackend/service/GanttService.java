@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ApiException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.GanttResponse;
 import com.workspan.workspanbackend.dto.GanttResponse.Bar;
 import com.workspan.workspanbackend.dto.GanttResponse.Link;
@@ -15,10 +19,8 @@ import com.workspan.workspanbackend.entity.TaskStatus;
 import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.repository.TaskDependencyRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.ArrayDeque;
@@ -93,8 +95,12 @@ public class GanttService {
             LocalDate previousStart = task.getBaselineStart(), previousEnd = task.getBaselineEnd();
             try {
                 taskService.applySchedule(task, row.forecastStart(), row.forecastEnd(), null, null, task.getProgress());
-            } catch (ResponseStatusException cause) {
-                throw new ResponseStatusException(cause.getStatusCode(), "Cannot reschedule task \"" + task.getName() + "\": " + cause.getReason());
+            } catch (ApiException cause) {
+                Map<String, Object> params = new java.util.LinkedHashMap<>(cause.getParams());
+                params.put("task", task.getName());
+                params.put("reason", cause.getMessage());
+                params.put("causeCode", cause.getCode().name());
+                throw new ConflictException(ErrorCode.TASK_RESCHEDULE_BLOCKED, params);
             }
             moves.add(new RescheduleResponse.Move(task.getId(), task.getName(), previousStart, previousEnd, row.forecastStart(), row.forecastEnd()));
         }
@@ -401,7 +407,7 @@ public class GanttService {
 
     private Project requireProject(UUID id, UUID organizationId) {
         return projects.findByIdAndSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
     }
 
     /** Working state of one task during the calculation (epoch days, finish exclusive). */

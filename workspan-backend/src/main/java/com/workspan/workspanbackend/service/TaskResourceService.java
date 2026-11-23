@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.TaskResourceAllocationRequest;
 import com.workspan.workspanbackend.dto.TaskResourceAllocationResponse;
 import com.workspan.workspanbackend.dto.TaskResourceOptionResponse;
@@ -7,10 +11,9 @@ import com.workspan.workspanbackend.entity.*;
 import com.workspan.workspanbackend.repository.ProjectResourceAllocationRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
 import com.workspan.workspanbackend.repository.TaskResourceAllocationRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+import java.util.Map;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -62,7 +65,7 @@ public class TaskResourceService {
     public void validateSchedule(Task task, Project targetProject, TaskStatus targetStatus, LocalDate startDate, LocalDate endDate) {
         for (TaskResourceAllocation current : taskAllocations.findAllByTaskIdOrderByAllocatedAtAsc(task.getId())) {
             projectAllocations.findByProjectIdAndResourceId(targetProject.getId(), current.getProjectResourceAllocation().getResource().getId())
-                    .orElseThrow(() -> conflict("The task's resource must be in the target project's pool"));
+                    .orElseThrow(() -> new ConflictException(ErrorCode.TASK_RESOURCE_NOT_IN_TARGET_POOL));
         }
     }
 
@@ -70,7 +73,7 @@ public class TaskResourceService {
     public void moveAssignmentsToProjectPool(Task task, Project targetProject) {
         List<TaskResourceAllocation> current = taskAllocations.findAllByTaskIdOrderByAllocatedAtAsc(task.getId());
         current.forEach(item -> item.setProjectResourceAllocation(projectAllocations.findByProjectIdAndResourceId(targetProject.getId(), item.getProjectResourceAllocation().getResource().getId())
-                .orElseThrow(() -> conflict("The task's resource must be in the target project's pool"))));
+                .orElseThrow(() -> new ConflictException(ErrorCode.TASK_RESOURCE_NOT_IN_TARGET_POOL))));
         taskAllocations.saveAll(current);
     }
 
@@ -78,45 +81,45 @@ public class TaskResourceService {
     public void validateProjectSchedule(Project project, LocalDate nextStart, LocalDate nextEnd) {
         for (Task task : tasks.findAllByProjectIdOrderByNameAsc(project.getId())) {
             if (task.getBaselineStart() != null && nextStart != null && task.getBaselineStart().isBefore(nextStart))
-                throw badRequest("A project cannot be planned to start after the planned start of task " + task.getName());
+                throw new BadRequestException(ErrorCode.PROJECT_STARTS_AFTER_TASK, Map.of("task", task.getName()));
             if (task.getBaselineEnd() != null && nextEnd != null && task.getBaselineEnd().isAfter(nextEnd))
-                throw badRequest("A project cannot be planned to end before the planned end of task " + task.getName());
+                throw new BadRequestException(ErrorCode.PROJECT_ENDS_BEFORE_TASK, Map.of("task", task.getName()));
         }
     }
 
     @Transactional
     public TaskResourceAllocationResponse assign(UUID taskId, UUID organizationId, TaskResourceAllocationRequest request) {
         Task task = requireTask(taskId, organizationId);
-        if (task.getStatus() == TaskStatus.DONE) throw conflict("Resources cannot be assigned to a completed task");
+        if (task.getStatus() == TaskStatus.DONE) throw new ConflictException(ErrorCode.TASK_COMPLETED_RESOURCE_LOCKED);
         ProjectResourceAllocation projectAllocation = projectAllocations.findByProjectIdAndResourceId(task.getProject().getId(), request.resourceId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Assign the resource to the project pool first"));
+                .orElseThrow(() -> new BadRequestException(ErrorCode.RESOURCE_NOT_IN_PROJECT_POOL));
         Resource resource = projectAllocation.getResource();
-        if (!"AVAILABLE".equalsIgnoreCase(resource.getStatus())) throw conflict("This resource is not available");
+        if (!"AVAILABLE".equalsIgnoreCase(resource.getStatus())) throw new ConflictException(ErrorCode.RESOURCE_UNAVAILABLE);
         if (taskAllocations.findByTaskIdAndProjectResourceAllocationId(taskId, projectAllocation.getId()).isPresent())
-            throw conflict("This resource is already assigned to the task");
+            throw new ConflictException(ErrorCode.RESOURCE_ALREADY_ON_TASK);
 
         Window requestedWindow = window(task);
         if (requestedWindow.end() != null && requestedWindow.end().isBefore(LocalDate.now()))
-            throw conflict("Resources cannot be assigned to a task whose scheduled period has ended");
+            throw new ConflictException(ErrorCode.TASK_PERIOD_ENDED);
         List<TaskResourceAllocation> existing = taskAllocations.findAllByProjectResourceAllocationId(projectAllocation.getId());
         Integer allocationPercent = null;
         if (resource instanceof HumanResource) {
             // Overlapping assignments are allowed; the workload analysis reports days above 100% as overload.
-            if (request.quantity() != null || request.amount() != null) throw badRequest("An employee is assigned with a percentage of their time");
+            if (request.quantity() != null || request.amount() != null) throw new BadRequestException(ErrorCode.EMPLOYEE_TASK_ALLOCATION_INVALID);
             allocationPercent = request.allocationPercent() == null ? 100 : request.allocationPercent();
         } else if (resource instanceof EquipmentResource) {
             // A single assignment cannot exceed the units allocated to the project; concurrent use is reported as overload.
-            if (request.quantity() == null || request.amount() != null || request.allocationPercent() != null) throw badRequest("Choose the number of equipment units to allocate");
+            if (request.quantity() == null || request.amount() != null || request.allocationPercent() != null) throw new BadRequestException(ErrorCode.EQUIPMENT_QUANTITY_REQUIRED);
             if (request.quantity() > (projectAllocation.getAllocatedQuantity() == null ? 0 : projectAllocation.getAllocatedQuantity()))
-                throw conflict("This allocation exceeds the units allocated to the project");
+                throw new ConflictException(ErrorCode.PROJECT_UNITS_EXCEEDED);
         } else if (resource instanceof BudgetResource) {
-            if (request.allocationPercent() != null) throw badRequest("Choose a budget amount to allocate");
-            if (request.amount() == null || request.quantity() != null) throw badRequest("Choose a budget amount to allocate");
-            if (request.amount().signum() <= 0) throw badRequest("The budget amount must be greater than zero");
+            if (request.allocationPercent() != null) throw new BadRequestException(ErrorCode.BUDGET_AMOUNT_REQUIRED);
+            if (request.amount() == null || request.quantity() != null) throw new BadRequestException(ErrorCode.BUDGET_AMOUNT_REQUIRED);
+            if (request.amount().signum() <= 0) throw new BadRequestException(ErrorCode.BUDGET_AMOUNT_NOT_POSITIVE);
             BigDecimal concurrent = existing.stream()
                     .map(item -> item.getAllocatedAmount() == null ? BigDecimal.ZERO : item.getAllocatedAmount())
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            if (concurrent.add(request.amount()).compareTo(projectAllocation.getAllocatedAmount()) > 0) throw conflict("This allocation exceeds the project's available budget");
+            if (concurrent.add(request.amount()).compareTo(projectAllocation.getAllocatedAmount()) > 0) throw new ConflictException(ErrorCode.PROJECT_BUDGET_EXCEEDED);
         }
 
         TaskResourceAllocation allocation = new TaskResourceAllocation();
@@ -130,18 +133,18 @@ public class TaskResourceService {
     public void remove(UUID taskId, UUID organizationId, UUID resourceId) {
         Task task = requireTask(taskId, organizationId);
         ProjectResourceAllocation projectAllocation = projectAllocations.findByProjectIdAndResourceId(task.getProject().getId(), resourceId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project resource allocation not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_RESOURCE_NOT_FOUND));
         TaskResourceAllocation assignment = taskAllocations.findByTaskIdAndProjectResourceAllocationId(taskId, projectAllocation.getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task resource assignment not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_RESOURCE_NOT_FOUND));
         if (assignment.getProjectResourceAllocation().getResource() instanceof BudgetResource &&
                 (task.getStatus() == TaskStatus.DONE || window(task).end() != null && window(task).end().isBefore(LocalDate.now())))
-            throw conflict("Budget cannot be withdrawn after the task has ended");
+            throw new ConflictException(ErrorCode.TASK_ENDED_BUDGET_LOCKED);
         taskAllocations.delete(assignment);
     }
 
     private Task requireTask(UUID id, UUID organizationId) {
         return tasks.findByIdAndProjectSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_NOT_FOUND));
     }
     private Window window(Task task) {
         return window(task, task.getProject(), ScheduleDates.taskStart(task), ScheduleDates.taskEnd(task));
@@ -194,8 +197,6 @@ public class TaskResourceService {
         return peak;
     }
 
-    private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
-    private ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
     private record Window(LocalDate start, LocalDate end) {}
 }
 

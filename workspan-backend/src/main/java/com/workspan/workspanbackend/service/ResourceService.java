@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.ResourceRequest;
 import com.workspan.workspanbackend.dto.ResourceResponse;
 import com.workspan.workspanbackend.entity.*;
@@ -7,10 +11,8 @@ import com.workspan.workspanbackend.repository.HumanResourceRepository;
 import com.workspan.workspanbackend.repository.ProjectResourceAllocationRepository;
 import com.workspan.workspanbackend.repository.ResourceRepository;
 import com.workspan.workspanbackend.repository.SpaceRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -40,19 +42,19 @@ public class ResourceService {
         Resource resource;
         if (request.type() == ResourceType.EQUIPMENT) {
             if (request.quantity() == null || request.amount() != null || request.currency() != null)
-                throw badRequest("Equipment requires a quantity and does not accept a budget amount");
+                throw new BadRequestException(ErrorCode.EQUIPMENT_FIELDS_INVALID);
             EquipmentResource equipment = new EquipmentResource();
             equipment.setQuantity(request.quantity());
             resource = equipment;
         } else if (request.type() == ResourceType.BUDGET) {
             if (request.amount() == null || request.quantity() != null)
-                throw badRequest("Budget resources require an amount and do not accept a quantity");
+                throw new BadRequestException(ErrorCode.BUDGET_FIELDS_INVALID);
             BudgetResource budget = new BudgetResource();
             budget.setAmount(request.amount()); budget.setRemaining(request.amount()); budget.setConsumed(BigDecimal.ZERO);
             budget.setCurrency(request.currency() == null ? "USD" : request.currency());
             resource = budget;
         } else {
-            throw badRequest("Employees are managed through the employee directory");
+            throw new BadRequestException(ErrorCode.EMPLOYEE_MANAGED_IN_DIRECTORY);
         }
         resource.setSpace(space); resource.setType(request.type()); resource.setName(request.name().trim());
         resource.setStatus("AVAILABLE");
@@ -62,16 +64,16 @@ public class ResourceService {
     @Transactional
     public void delete(UUID spaceId, UUID resourceId, UUID organizationId) {
         Resource resource = resources.findByIdAndSpaceOrganizationId(resourceId, organizationId)
-                .orElseThrow(() -> notFound("Resource not found"));
-        if (!resource.getSpace().getId().equals(spaceId)) throw notFound("Resource not found in this space");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.RESOURCE_NOT_FOUND));
+        if (!resource.getSpace().getId().equals(spaceId)) throw new NotFoundException(ErrorCode.RESOURCE_NOT_IN_SPACE);
         if (allocations.existsByResourceId(resourceId))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove this resource from its projects before deleting it");
-        if (resource instanceof HumanResource) throw badRequest("Employees are removed through the employee directory");
+            throw new ConflictException(ErrorCode.RESOURCE_ASSIGNED_TO_PROJECTS);
+        if (resource instanceof HumanResource) throw new BadRequestException(ErrorCode.EMPLOYEE_MANAGED_IN_DIRECTORY);
         resources.delete(resource);
     }
 
     private Space requireSpace(UUID id, UUID organizationId) {
-        return spaces.findByIdAndOrganizationId(id, organizationId).orElseThrow(() -> notFound("Space not found"));
+        return spaces.findByIdAndOrganizationId(id, organizationId).orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
     }
     private ResourceResponse response(Resource resource) {
         Integer quantity = resource instanceof EquipmentResource equipment ? equipment.getQuantity() : null;
@@ -90,8 +92,6 @@ public class ResourceService {
         return new ResourceResponse(resource.getId(), resource.getSpace().getId(), resource.getName(), resource.getType(),
                 resource.getStatus(), quantity, availableQuantity, amount, consumed, remaining, availableAmount, currency, email, jobTitle);
     }
-    private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }
-    private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private boolean isProjectAllocationActive(ProjectResourceAllocation allocation) {
         LocalDate today = LocalDate.now();
         return (ScheduleDates.projectStart(allocation.getProject()) == null || !today.isBefore(ScheduleDates.projectStart(allocation.getProject())))

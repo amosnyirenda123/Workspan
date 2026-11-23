@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.ForbiddenException;
+import com.workspan.workspanbackend.exception.NotFoundException;
+import com.workspan.workspanbackend.exception.UnauthorizedException;
 import com.workspan.workspanbackend.dto.AuthResponse;
 import com.workspan.workspanbackend.entity.RoleScope;
 import com.workspan.workspanbackend.repository.OrganizationRoleAssignmentRepository;
@@ -10,10 +14,9 @@ import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.entity.Space;
 import com.workspan.workspanbackend.entity.Project;
 import jakarta.servlet.http.HttpSession;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
 import java.util.UUID;
 import java.util.List;
 
@@ -43,27 +46,27 @@ public class WorkspaceAccess {
 
     public UUID userId(HttpSession session) {
         Object id = session.getAttribute("authenticatedUserId");
-        if (!(id instanceof UUID userId)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        if (!(id instanceof UUID userId)) throw new UnauthorizedException(ErrorCode.AUTHENTICATION_REQUIRED);
         AuthResponse user = auth.currentUser(userId);
-        if (user.mustChangePassword()) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Change the temporary password before continuing");
+        if (user.mustChangePassword()) throw new ForbiddenException(ErrorCode.PASSWORD_CHANGE_REQUIRED);
         return user.userId();
     }
 
     private AuthResponse current(HttpSession session) {
         Object id = session.getAttribute("authenticatedUserId");
-        if (!(id instanceof UUID userId)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        if (!(id instanceof UUID userId)) throw new UnauthorizedException(ErrorCode.AUTHENTICATION_REQUIRED);
         AuthResponse user = auth.currentUser(userId);
-        if (user.mustChangePassword()) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Change the temporary password before continuing");
+        if (user.mustChangePassword()) throw new ForbiddenException(ErrorCode.PASSWORD_CHANGE_REQUIRED);
         return user;
     }
 
     public UUID organizationAdminId(HttpSession session) {
         Object id = session.getAttribute("authenticatedUserId");
-        if (!(id instanceof UUID userId)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        if (!(id instanceof UUID userId)) throw new UnauthorizedException(ErrorCode.AUTHENTICATION_REQUIRED);
         AuthResponse user = auth.currentUser(userId);
-        if (user.mustChangePassword()) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Change the temporary password before continuing");
+        if (user.mustChangePassword()) throw new ForbiddenException(ErrorCode.PASSWORD_CHANGE_REQUIRED);
         if (!assignments.hasOrganizationAdminRole(userId, RoleScope.ORGANIZATION)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Organization administrator access required");
+            throw new ForbiddenException(ErrorCode.ORGANIZATION_ADMIN_REQUIRED);
         }
         return user.organizationId();
     }
@@ -77,7 +80,7 @@ public class WorkspaceAccess {
     public UUID requireSpacePermission(HttpSession session, UUID spaceId, String permissionKey) {
         AuthResponse user = current(session);
         Space space = spaces.findByIdAndOrganizationId(spaceId, user.organizationId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
         require(user, RoleScope.SPACE, spaceId, permissionKey);
         return user.organizationId();
     }
@@ -85,40 +88,40 @@ public class WorkspaceAccess {
     public UUID requireSpaceAnyPermission(HttpSession session, UUID spaceId, List<String> permissionKeys) {
         AuthResponse user = current(session);
         Space space = spaces.findByIdAndOrganizationId(spaceId, user.organizationId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
         boolean allowed = permissionKeys.stream().anyMatch(key -> hasSpacePermission(user.userId(), user.organizationId(), spaceId, key));
-        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "A space permission is required");
+        if (!allowed) throw new ForbiddenException(ErrorCode.SPACE_PERMISSION_REQUIRED);
         return user.organizationId();
     }
 
     public UUID requireResourcePoolRead(HttpSession session, UUID spaceId) {
         AuthResponse user = current(session);
         spaces.findByIdAndOrganizationId(spaceId, user.organizationId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
         boolean allowed = hasSpacePermission(user.userId(), user.organizationId(), spaceId, "resource.pool.view")
                 || hasSpacePermission(user.userId(), user.organizationId(), spaceId, "resource.pool.manage")
                 || hasSpacePermission(user.userId(), user.organizationId(), spaceId, "project.resources.manage")
                 || projects.findAllBySpaceIdOrderByNameAsc(spaceId).stream()
                     .anyMatch(project -> hasProjectPermission(user.userId(), user.organizationId(), spaceId, project.getId(), "project.resources.manage"));
-        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permission required to view this resource pool");
+        if (!allowed) throw new ForbiddenException(ErrorCode.RESOURCE_POOL_PERMISSION_REQUIRED);
         return user.organizationId();
     }
 
     public UUID requireProjectPermission(HttpSession session, UUID projectId, String permissionKey) {
         AuthResponse user = current(session);
         Project project = projects.findByIdAndSpaceOrganizationId(projectId, user.organizationId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
         if (!hasProjectPermission(user.userId(), user.organizationId(), project.getSpace().getId(), projectId, permissionKey))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permission required: " + permissionKey);
+            throw new ForbiddenException(ErrorCode.PERMISSION_REQUIRED, Map.of("permission", permissionKey));
         return user.organizationId();
     }
 
     public UUID requireProjectAnyPermission(HttpSession session, UUID projectId, List<String> permissionKeys) {
         AuthResponse user = current(session);
         Project project = projects.findByIdAndSpaceOrganizationId(projectId, user.organizationId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
         boolean allowed = permissionKeys.stream().anyMatch(key -> hasProjectPermission(user.userId(), user.organizationId(), project.getSpace().getId(), projectId, key));
-        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "A project permission is required");
+        if (!allowed) throw new ForbiddenException(ErrorCode.PROJECT_PERMISSION_REQUIRED);
         return user.organizationId();
     }
 
@@ -158,17 +161,17 @@ public class WorkspaceAccess {
     public void requireScopeManager(HttpSession session, RoleScope scope, UUID scopeId) {
         AuthResponse user = current(session);
         if (scope == RoleScope.ORGANIZATION) {
-            if (!user.organizationId().equals(scopeId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found");
+            if (!user.organizationId().equals(scopeId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
             require(user, RoleScope.ORGANIZATION, null, "access.manage");
         } else if (scope == RoleScope.SPACE) {
             Space space = spaces.findByIdAndOrganizationId(scopeId, user.organizationId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+                    .orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
             require(user, RoleScope.SPACE, space.getId(), "access.manage");
         } else {
             Project project = projects.findByIdAndSpaceOrganizationId(scopeId, user.organizationId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                    .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
             if (!hasProjectPermission(user.userId(), user.organizationId(), project.getSpace().getId(), project.getId(), "access.manage"))
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permission required: access.manage");
+                throw new ForbiddenException(ErrorCode.PERMISSION_REQUIRED, Map.of("permission", "access.manage"));
         }
     }
 
@@ -180,6 +183,6 @@ public class WorkspaceAccess {
             allowed = targetScope == RoleScope.SPACE
                     ? spaceAssignments.hasPermission(userId, scopeId, permissionKey)
                     : projectAssignments.hasPermission(userId, scopeId, permissionKey);
-        if (!allowed) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permission required: " + permissionKey);
+        if (!allowed) throw new ForbiddenException(ErrorCode.PERMISSION_REQUIRED, Map.of("permission", permissionKey));
     }
 }

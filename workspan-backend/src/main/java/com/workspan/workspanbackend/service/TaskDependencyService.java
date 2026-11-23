@@ -1,15 +1,17 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.TaskDependencyRequest;
 import com.workspan.workspanbackend.dto.TaskDependencyResponse;
 import com.workspan.workspanbackend.entity.Task;
 import com.workspan.workspanbackend.entity.TaskDependency;
 import com.workspan.workspanbackend.repository.TaskDependencyRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -50,7 +52,7 @@ public class TaskDependencyService {
         validate(projectId, predecessor, successor, null);
         if (dependencies.existsByPredecessorTaskIdAndSuccessorTaskId(predecessor.getId(), successor.getId())
                 || dependencies.existsByPredecessorTaskIdAndSuccessorTaskId(successor.getId(), predecessor.getId()))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "These tasks are already linked");
+            throw new ConflictException(ErrorCode.TASKS_ALREADY_LINKED);
         TaskDependency dependency = new TaskDependency();
         dependency.setPredecessorTask(predecessor);
         dependency.setSuccessorTask(successor);
@@ -71,7 +73,7 @@ public class TaskDependencyService {
             validate(projectId, predecessor, successor, dependency.getId());
             if (dependencies.findAllByPredecessorTaskProjectId(projectId).stream().anyMatch(other -> !other.getId().equals(dependency.getId())
                     && (sameEdge(other, predecessor, successor) || sameEdge(other, successor, predecessor))))
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "These tasks are already linked");
+                throw new ConflictException(ErrorCode.TASKS_ALREADY_LINKED);
         }
         dependency.setPredecessorTask(predecessor);
         dependency.setSuccessorTask(successor);
@@ -86,11 +88,11 @@ public class TaskDependencyService {
     }
 
     private void validate(UUID projectId, Task predecessor, Task successor, UUID ignoredDependencyId) {
-        if (predecessor.getId().equals(successor.getId())) throw badRequest("A task cannot depend on itself");
+        if (predecessor.getId().equals(successor.getId())) throw new BadRequestException(ErrorCode.SELF_DEPENDENCY);
         if (!predecessor.getProject().getId().equals(projectId) || !successor.getProject().getId().equals(projectId))
-            throw badRequest("Both tasks must belong to the same project");
+            throw new BadRequestException(ErrorCode.DEPENDENCY_CROSS_PROJECT);
         if (createsCycle(projectId, predecessor.getId(), successor.getId(), ignoredDependencyId))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This dependency would create a cycle");
+            throw new ConflictException(ErrorCode.DEPENDENCY_CYCLE);
     }
 
     /** A new edge pred -> succ creates a cycle when pred is already reachable from succ. */
@@ -116,12 +118,12 @@ public class TaskDependencyService {
 
     private TaskDependency require(UUID id, UUID organizationId) {
         return dependencies.findByIdAndPredecessorTaskProjectSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dependency not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.DEPENDENCY_NOT_FOUND));
     }
 
     private Task requireTask(UUID id, UUID organizationId) {
         return tasks.findByIdAndProjectSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_NOT_FOUND));
     }
 
     private TaskDependencyResponse response(TaskDependency dependency) {
@@ -130,5 +132,4 @@ public class TaskDependencyService {
                 dependency.getLag() == null ? 0 : dependency.getLag());
     }
 
-    private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
 }

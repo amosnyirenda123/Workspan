@@ -1,5 +1,10 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.ValidationException;
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.EmployeeImportRow;
 import com.workspan.workspanbackend.dto.EmployeeEmailRequest;
 import com.workspan.workspanbackend.dto.EmployeeResponse;
@@ -8,17 +13,12 @@ import com.workspan.workspanbackend.entity.Space;
 import com.workspan.workspanbackend.repository.HumanResourceRepository;
 import com.workspan.workspanbackend.repository.SpaceRepository;
 import com.workspan.workspanbackend.repository.UserAccountRepository;
-import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Comparator;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 public class EmployeeWriter {
@@ -38,18 +38,14 @@ public class EmployeeWriter {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EmployeeResponse create(UUID organizationId, EmployeeImportRow row) {
         var violations = validator.validate(row);
-        if (!violations.isEmpty()) {
-            String message = violations.stream().sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
-                    .map(ConstraintViolation::getMessage).collect(Collectors.joining("; "));
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
-        }
+        if (!violations.isEmpty()) throw ValidationException.of(violations);
 
         String email = row.email().trim().toLowerCase(java.util.Locale.ROOT);
         if (employees.existsByEmailIgnoreCase(email) || users.existsByEmailIgnoreCase(email)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "An employee or user with this email already exists");
+            throw new ConflictException(ErrorCode.EMAIL_ALREADY_IN_USE);
         }
         Space space = spaces.findByIdAndOrganizationId(row.spaceId(), organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Space not found in this organization"));
+                .orElseThrow(() -> new BadRequestException(ErrorCode.SPACE_NOT_IN_ORGANIZATION));
 
         HumanResource employee = new HumanResource();
         employee.setSpace(space);
@@ -66,15 +62,15 @@ public class EmployeeWriter {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EmployeeResponse updateEmail(UUID organizationId, UUID employeeId, EmployeeEmailRequest request) {
         var violations = validator.validate(request);
-        if (!violations.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid employee email is required");
+        if (!violations.isEmpty()) throw new BadRequestException(ErrorCode.EMPLOYEE_EMAIL_INVALID);
         HumanResource employee = employees.findByIdAndSpaceOrganizationId(employeeId, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
         String email = request.email().trim().toLowerCase(java.util.Locale.ROOT);
         if (employee.getUser() != null && !employee.getEmail().equalsIgnoreCase(email)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email cannot be changed after an account has been created");
+            throw new ConflictException(ErrorCode.EMPLOYEE_EMAIL_LOCKED);
         }
         if (employees.existsByEmailIgnoreCaseAndIdNot(email, employeeId) || users.existsByEmailIgnoreCase(email)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This email already belongs to another employee or account");
+            throw new ConflictException(ErrorCode.EMAIL_ALREADY_IN_USE);
         }
         employee.setEmail(email);
         HumanResource saved = employees.saveAndFlush(employee);

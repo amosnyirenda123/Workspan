@@ -12,6 +12,9 @@ export function ProjectResourcesPanel({ project, onClose }: { project: Project; 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadedProjectId, setLoadedProjectId] = useState(project.id)
+  // Reset while rendering when the input changes (instead of in the effect) so stale data is never shown.
+  if (loadedProjectId !== project.id) { setLoadedProjectId(project.id); setLoading(true); setError('') }
   const assignedIds = useMemo(() => new Set(assigned.map(item => item.resourceId)), [assigned])
   const canAssign = (resource: Resource) => resource.type === 'HUMAN' || (resource.type === 'EQUIPMENT' ? (resource.availableQuantity ?? 0) > 0 : (resource.availableAmount ?? 0) > 0)
   const selectedResource = pool.find(resource => resource.id === resourceId)
@@ -45,7 +48,6 @@ export function ProjectResourcesPanel({ project, onClose }: { project: Project; 
 
   useEffect(() => {
     let active = true
-    setLoading(true); setError('')
     Promise.all([projectResourceService.pool(project.id), projectResourceService.assigned(project.id)])
       .then(([poolData, assignedData]) => {
         if (!active) return

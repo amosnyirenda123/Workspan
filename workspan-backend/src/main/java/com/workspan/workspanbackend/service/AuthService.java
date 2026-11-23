@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.UnauthorizedException;
 import com.workspan.workspanbackend.dto.AuthResponse;
 import com.workspan.workspanbackend.dto.LoginRequest;
 import com.workspan.workspanbackend.dto.RegisterRequest;
@@ -9,10 +13,8 @@ import com.workspan.workspanbackend.repository.OrganizationRepository;
 import com.workspan.workspanbackend.repository.OrganizationRoleAssignmentRepository;
 import com.workspan.workspanbackend.repository.RoleRepository;
 import com.workspan.workspanbackend.repository.UserAccountRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -35,8 +37,8 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         String organizationName = request.organizationName().trim();
-        if (users.existsByEmailIgnoreCase(email)) throw new ResponseStatusException(HttpStatus.CONFLICT, "An account with this email already exists");
-        if (organizations.existsByNameIgnoreCase(organizationName)) throw new ResponseStatusException(HttpStatus.CONFLICT, "An organization with this name already exists");
+        if (users.existsByEmailIgnoreCase(email)) throw new ConflictException(ErrorCode.ACCOUNT_EMAIL_TAKEN);
+        if (organizations.existsByNameIgnoreCase(organizationName)) throw new ConflictException(ErrorCode.ORGANIZATION_NAME_TAKEN);
 
         Organization organization = organizations.save(new Organization(organizationName));
         UserAccount user = new UserAccount();
@@ -63,26 +65,26 @@ public class AuthService {
     public AuthResponse authenticate(LoginRequest request) {
         UserAccount user = users.findByEmailIgnoreCase(request.email().trim())
                 .filter(account -> account.getStatus().equals("ACTIVE") && hasher.matches(request.password(), account.getPasswordHash()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password"));
+                .orElseThrow(() -> new UnauthorizedException(ErrorCode.INVALID_CREDENTIALS));
         return response(user);
     }
 
     @Transactional(readOnly = true)
     public AuthResponse currentUser(UUID id) {
         return users.findById(id).filter(user -> user.getStatus().equals("ACTIVE"))
-                .map(this::response).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
+                .map(this::response).orElseThrow(() -> new UnauthorizedException(ErrorCode.AUTHENTICATION_REQUIRED));
     }
 
     @Transactional
     public AuthResponse changePassword(UUID id, PasswordChangeRequest request) {
         UserAccount user = users.findById(id)
                 .filter(account -> account.getStatus().equals("ACTIVE"))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
+                .orElseThrow(() -> new UnauthorizedException(ErrorCode.AUTHENTICATION_REQUIRED));
         if (!hasher.matches(request.currentPassword(), user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+            throw new BadRequestException(ErrorCode.CURRENT_PASSWORD_INCORRECT);
         }
         if (request.currentPassword().equals(request.newPassword())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a different password");
+            throw new BadRequestException(ErrorCode.PASSWORD_REUSED);
         }
         user.setPasswordHash(hasher.hash(request.newPassword()));
         user.setMustChangePassword(false);

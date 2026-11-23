@@ -17,6 +17,9 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadedTaskId, setLoadedTaskId] = useState(task.id)
+  // Reset while rendering when the input changes (instead of in the effect) so stale data is never shown.
+  if (loadedTaskId !== task.id) { setLoadedTaskId(task.id); setLoading(true); setError('') }
   const selected = pool.find(item => item.resourceId === resourceId)
 
   async function refresh() {
@@ -27,7 +30,6 @@ export function TaskResourcesPanel({ task, project, onClose }: { task: Task; pro
 
   useEffect(() => {
     let active = true
-    setLoading(true); setError('')
     Promise.all([taskResourceService.pool(task.id), taskResourceService.assigned(task.id)]).then(([poolData, assignedData]) => {
       if (!active) return
       setPool(poolData); setAssigned(assignedData)

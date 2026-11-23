@@ -1,5 +1,7 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.entity.Organization;
 import com.workspan.workspanbackend.dto.OrganizationResponse;
 import com.workspan.workspanbackend.mapper.OrganizationMapper;
@@ -8,10 +10,8 @@ import com.workspan.workspanbackend.repository.OrganizationRepository;
 import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.repository.SpaceRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -35,16 +35,16 @@ public class OrganizationService {
 
     public List<OrganizationResponse> findForOrganization(UUID organizationId) {
         Organization organization = organizations.findById(organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND));
         return List.of(response(organization));
     }
 
     private OrganizationResponse findById(UUID id) {
-        return response(organizations.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found")));
+        return response(organizations.findById(id).orElseThrow(() -> new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND)));
     }
 
     public OrganizationResponse findById(UUID id, UUID organizationId) {
-        if (!id.equals(organizationId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Organization not found");
+        if (!id.equals(organizationId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
         return findById(id);
     }
 

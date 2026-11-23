@@ -9,10 +9,12 @@ import { canSpace } from '../../api/accessPermissions'
 type Kind = 'EQUIPMENT' | 'BUDGET'
 type ResourceFilter = 'ALL' | 'HUMAN' | 'EQUIPMENT' | 'BUDGET'
 
+const NO_RESOURCES: Resource[] = []
+
 export function ResourcesManager({ access }: { access: EffectiveAccess | null }) {
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState('')
-  const [resources, setResources] = useState<Resource[]>([])
+  const [loadedResources, setResources] = useState<Resource[]>([])
   const [kind, setKind] = useState<Kind>('EQUIPMENT')
   const [filter, setFilter] = useState<ResourceFilter>('ALL')
   const [name, setName] = useState('')
@@ -22,6 +24,10 @@ export function ResourcesManager({ access }: { access: EffectiveAccess | null })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadedSpaceId, setLoadedSpaceId] = useState(spaceId)
+  // Reset while rendering when the input changes (instead of in the effect) so stale data is never shown.
+  if (loadedSpaceId !== spaceId) { setLoadedSpaceId(spaceId); setResources([]); if (spaceId) setLoading(true) }
+  const resources = spaceId ? loadedResources : NO_RESOURCES
   const filteredResources = filter === 'ALL' ? resources : resources.filter(resource => resource.type === filter)
   const people = resources.filter(resource => resource.type === 'HUMAN')
   const equipment = resources.filter(resource => resource.type === 'EQUIPMENT')
@@ -42,9 +48,8 @@ export function ResourcesManager({ access }: { access: EffectiveAccess | null })
   }, [])
 
   useEffect(() => {
-    if (!spaceId) { setResources([]); return }
+    if (!spaceId) return
     let active = true
-    setLoading(true)
     resourceService.listForSpace(spaceId).then(data => { if (active) setResources(data) })
       .catch(cause => { if (active) setError(getApiErrorMessage(cause, 'Impossible de charger les ressources de cet espace.')) })
       .finally(() => { if (active) setLoading(false) })

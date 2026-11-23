@@ -1,12 +1,15 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.ForbiddenException;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.*;
 import com.workspan.workspanbackend.entity.*;
 import com.workspan.workspanbackend.repository.*;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 import java.util.*;
 
 @Service
@@ -47,8 +50,8 @@ public class AccessControlService {
         String name = request.name().trim();
         rejectReserved(name);
         if (roles.findByOrganizationIdAndNameAndScope(organizationId, name, request.scope()).isPresent())
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A role with this name already exists at this scope in the organization");
-        Organization organization = organizations.findById(organizationId).orElseThrow(() -> notFound("Organization not found"));
+            throw new ConflictException(ErrorCode.ROLE_NAME_TAKEN);
+        Organization organization = organizations.findById(organizationId).orElseThrow(() -> new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND));
         Role role = new Role(); role.setOrganization(organization); role.setName(name); role.setScope(request.scope());
         setRoleContext(role, request.scope(), request.contextId(), organizationId);
         return saveRole(role, request.permissionKeys());
@@ -57,12 +60,12 @@ public class AccessControlService {
     @Transactional
     public RoleResponse updateRole(UUID organizationId, UUID roleId, RoleRequest request) {
         Role role = roles.findById(roleId).filter(item -> item.getOrganization().getId().equals(organizationId))
-                .orElseThrow(() -> notFound("Role not found"));
-        if (reserved(role.getName())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Built-in roles cannot be changed");
-        if (role.getScope() != request.scope() || !sameContext(role, request.scope(), request.contextId())) throw badRequest("A role's scope cannot be changed");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.ROLE_NOT_FOUND));
+        if (reserved(role.getName())) throw new ConflictException(ErrorCode.BUILT_IN_ROLE_IMMUTABLE);
+        if (role.getScope() != request.scope() || !sameContext(role, request.scope(), request.contextId())) throw new BadRequestException(ErrorCode.ROLE_SCOPE_IMMUTABLE);
         rejectReserved(request.name().trim());
         if (!role.getName().equalsIgnoreCase(request.name().trim()) && roles.existsByOrganizationIdAndNameAndScopeAndIdNot(organizationId, request.name().trim(), role.getScope(), roleId))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A role with this name already exists at this scope in the organization");
+            throw new ConflictException(ErrorCode.ROLE_NAME_TAKEN);
         role.setName(request.name().trim());
         return saveRole(role, request.permissionKeys());
     }
@@ -70,10 +73,10 @@ public class AccessControlService {
     @Transactional
     public void deleteRole(UUID organizationId, UUID roleId, RoleScope scope, UUID contextId) {
         Role role = roles.findById(roleId).filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope && sameContext(item, scope, contextId))
-                .orElseThrow(() -> notFound("Role not found"));
-        if (reserved(role.getName())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Built-in roles cannot be deleted");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.ROLE_NOT_FOUND));
+        if (reserved(role.getName())) throw new ConflictException(ErrorCode.BUILT_IN_ROLE_UNDELETABLE);
         if (organizationAssignments.existsByRoleId(roleId) || spaceAssignments.existsByRoleId(roleId) || projectAssignments.existsByRoleId(roleId))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove this role from its users before deleting it");
+            throw new ConflictException(ErrorCode.ROLE_IN_USE);
         rolePermissions.deleteAllByRoleId(roleId); roles.delete(role);
     }
 
@@ -99,12 +102,12 @@ public class AccessControlService {
     public RoleAssignmentResponse assign(UUID organizationId, RoleScope scope, UUID contextId, UUID actorId, RoleAssignmentRequest request) {
         validateContext(organizationId, scope, contextId);
         if (actorId.equals(request.userId()))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot assign a role to your own account");
+            throw new ForbiddenException(ErrorCode.SELF_ROLE_ASSIGNMENT_FORBIDDEN);
         UserAccount user = users.findByIdAndOrganizationId(request.userId(), organizationId)
-                .filter(item -> "ACTIVE".equals(item.getStatus())).orElseThrow(() -> notFound("Active organization member not found"));
+                .filter(item -> "ACTIVE".equals(item.getStatus())).orElseThrow(() -> new NotFoundException(ErrorCode.ACTIVE_MEMBER_NOT_FOUND));
         Role role = roles.findById(request.roleId()).filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope && sameContext(item, scope, contextId))
-                .orElseThrow(() -> badRequest("Choose a role for this scope"));
-        if (role.getName().equalsIgnoreCase("ADMIN")) throw badRequest("Organization super administrator access cannot be assigned through role management");
+                .orElseThrow(() -> new BadRequestException(ErrorCode.ROLE_REQUIRED_FOR_SCOPE));
+        if (role.getName().equalsIgnoreCase("ADMIN")) throw new BadRequestException(ErrorCode.SUPER_ADMIN_NOT_ASSIGNABLE);
         if (scope == RoleScope.ORGANIZATION) {
             if (!organizationAssignments.existsByUserIdAndRoleId(user.getId(), role.getId())) {
                 OrganizationRoleAssignment assignment = new OrganizationRoleAssignment(); assignment.setUser(user); assignment.setRole(role);
@@ -130,8 +133,8 @@ public class AccessControlService {
     public void unassign(UUID organizationId, RoleScope scope, UUID contextId, UUID userId, UUID roleId) {
         validateContext(organizationId, scope, contextId);
         Role role = roles.findById(roleId).filter(item -> item.getOrganization().getId().equals(organizationId) && item.getScope() == scope && sameContext(item, scope, contextId))
-                .orElseThrow(() -> notFound("Role not found"));
-        if (role.getName().equalsIgnoreCase("ADMIN")) throw new ResponseStatusException(HttpStatus.CONFLICT, "The organization super administrator assignment is protected");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.ROLE_NOT_FOUND));
+        if (role.getName().equalsIgnoreCase("ADMIN")) throw new ConflictException(ErrorCode.SUPER_ADMIN_ASSIGNMENT_PROTECTED);
         if (scope == RoleScope.ORGANIZATION) organizationAssignments.findByUserIdAndRoleId(userId, roleId).ifPresent(organizationAssignments::delete);
         else if (scope == RoleScope.SPACE) spaceAssignments.findByUserIdAndRoleIdAndSpaceId(userId, roleId, contextId).ifPresent(spaceAssignments::delete);
         else projectAssignments.findByUserIdAndRoleIdAndProjectId(userId, roleId, contextId).ifPresent(projectAssignments::delete);
@@ -140,13 +143,13 @@ public class AccessControlService {
     private RoleResponse saveRole(Role role, List<String> permissionKeys) {
         List<String> distinctKeys = permissionKeys.stream().distinct().toList();
         if (distinctKeys.stream().anyMatch(key -> !allowedAtScope(role.getScope(), key)))
-            throw badRequest("This permission cannot be used at the selected role scope");
+            throw new BadRequestException(ErrorCode.PERMISSION_SCOPE_MISMATCH);
         if ((distinctKeys.contains("gantt.schedule.manage") || distinctKeys.contains("gantt.dependencies.manage")) && !distinctKeys.contains("gantt.view"))
-            throw badRequest("Gantt schedule and dependency permissions require gantt.view");
+            throw new BadRequestException(ErrorCode.GANTT_PERMISSIONS_REQUIRE_VIEW);
         if (distinctKeys.contains("workload.manage") && !distinctKeys.contains("workload.view"))
-            throw badRequest("Workload management permission requires workload.view");
+            throw new BadRequestException(ErrorCode.WORKLOAD_MANAGE_REQUIRES_VIEW);
         List<Permission> selected = permissions.findAllByKeyIn(distinctKeys);
-        if (selected.size() != distinctKeys.size()) throw badRequest("One or more permissions are not in the permission catalogue");
+        if (selected.size() != distinctKeys.size()) throw new BadRequestException(ErrorCode.UNKNOWN_PERMISSION);
         Role saved = roles.saveAndFlush(role);
         rolePermissions.deleteAllByRoleId(saved.getId());
         selected.forEach(permission -> { RolePermission link = new RolePermission(); link.setRole(saved); link.setPermission(permission); rolePermissions.save(link); });
@@ -159,15 +162,15 @@ public class AccessControlService {
     }
     private void validateContext(UUID organizationId, RoleScope scope, UUID contextId) {
         if (scope == RoleScope.ORGANIZATION) {
-            if (!organizationId.equals(contextId)) throw notFound("Organization not found");
+            if (!organizationId.equals(contextId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
         } else if (scope == RoleScope.SPACE) requireSpace(contextId, organizationId);
         else requireProject(contextId, organizationId);
     }
     private Space requireSpace(UUID id, UUID organizationId) {
-        return spaces.findByIdAndOrganizationId(id, organizationId).orElseThrow(() -> notFound("Space not found"));
+        return spaces.findByIdAndOrganizationId(id, organizationId).orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
     }
     private Project requireProject(UUID id, UUID organizationId) {
-        return projects.findByIdAndSpaceOrganizationId(id, organizationId).orElseThrow(() -> notFound("Project not found"));
+        return projects.findByIdAndSpaceOrganizationId(id, organizationId).orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
     }
     private List<Role> findRoles(UUID organizationId, RoleScope scope, UUID contextId) {
         if (scope == RoleScope.ORGANIZATION) return roles.findAllByOrganizationIdAndScopeOrderByNameAsc(organizationId, scope).stream()
@@ -178,7 +181,7 @@ public class AccessControlService {
     private void setRoleContext(Role role, RoleScope scope, UUID contextId, UUID organizationId) {
         if (scope == RoleScope.SPACE) role.setScopeSpace(requireSpace(contextId, organizationId));
         else if (scope == RoleScope.PROJECT) role.setScopeProject(requireProject(contextId, organizationId));
-        else if (!organizationId.equals(contextId)) throw notFound("Organization not found");
+        else if (!organizationId.equals(contextId)) throw new NotFoundException(ErrorCode.ORGANIZATION_NOT_FOUND);
     }
     private boolean sameContext(Role role, RoleScope scope, UUID contextId) {
         if (scope == RoleScope.ORGANIZATION) return role.getScopeSpace() == null && role.getScopeProject() == null;
@@ -194,7 +197,5 @@ public class AccessControlService {
     private boolean allowedAtScope(RoleScope scope, String key) {
         return PermissionCatalog.allowedAt(scope, key);
     }
-    private void rejectReserved(String name) { if (reserved(name)) throw badRequest("This role name is reserved for the platform"); }
-    private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }
-    private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
+    private void rejectReserved(String name) { if (reserved(name)) throw new BadRequestException(ErrorCode.RESERVED_ROLE_NAME); }
 }

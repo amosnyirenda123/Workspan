@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.controller;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.EmployeeRequest;
 import com.workspan.workspanbackend.dto.EmployeeInviteRequest;
 import com.workspan.workspanbackend.dto.EmployeeEmailRequest;
@@ -70,7 +74,7 @@ public class EmployeeController {
                                         @Valid @RequestBody EmployeeEmailRequest request, HttpSession session) {
         java.util.UUID organizationId = access.organizationId(session);
         EmployeeResponse employee = employees.findAll(organizationId).stream().filter(item -> item.id().equals(employeeId)).findFirst()
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
         access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
         return employees.updateEmail(organizationId, employeeId, request);
     }
@@ -86,7 +90,7 @@ public class EmployeeController {
     public CredentialDeliveryResult sendCredentials(@PathVariable java.util.UUID employeeId, HttpSession session) {
         java.util.UUID organizationId = access.organizationId(session);
         EmployeeResponse employee = employees.findAll(organizationId).stream().filter(item -> item.id().equals(employeeId)).findFirst()
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
         access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
         return credentials.sendOne(organizationId, employeeId);
     }
@@ -113,18 +117,18 @@ public class EmployeeController {
         java.util.UUID organizationId = access.organizationId(session);
         EmployeeResponse employee = findEmployee(organizationId, employeeId);
         access.requireSpacePermission(session, employee.spaceId(), "employee.manage_accounts");
-        if (employee.hasAccount()) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "This employee already has an account");
+        if (employee.hasAccount()) throw new ConflictException(ErrorCode.EMPLOYEE_ALREADY_HAS_ACCOUNT);
         if (request.roleScope() == RoleScope.ORGANIZATION)
             access.requireScopeManager(session, RoleScope.ORGANIZATION, organizationId);
         else if (request.roleScope() == RoleScope.SPACE)
             access.requireScopeManager(session, RoleScope.SPACE, employee.spaceId());
-        else throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an organization or employee-space role");
+        else throw new BadRequestException(ErrorCode.INVITATION_ROLE_REQUIRED);
         return credentials.invite(organizationId, employeeId, request.roleId(), request.roleScope());
     }
 
     private EmployeeResponse findEmployee(java.util.UUID organizationId, java.util.UUID employeeId) {
         return employees.findAll(organizationId).stream().filter(item -> item.id().equals(employeeId)).findFirst()
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_FOUND));
     }
 
     private boolean isReserved(String name) {

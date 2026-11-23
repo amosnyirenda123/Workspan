@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { employeeService } from '../../api/employeeService'
 import { getApiErrorMessage } from '../../api/http'
+import { describeResultReason } from '../../api/errors'
 import { spaceService } from '../../api/spaceService'
 import type { AccessRole, CredentialBatchResponse, CredentialDeliveryResult, Employee, EmployeeImportRowResult, Space } from '../../api/types'
 import { downloadEmployeeTemplate, parseEmployeeFile, type EmployeeImportPreviewRow } from './employeeImport'
@@ -109,7 +110,7 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
       const serverRows: ImportReportRow[] = result.rows.map((row: EmployeeImportRowResult) => ({
         rowNumber: row.rowNumber,
         status: row.status === 'CREATED' ? 'Ajoute' : 'Ignore',
-        message: row.message,
+        message: row.status === 'CREATED' ? 'Employé ajouté.' : describeResultReason(row, 'Ligne ignorée.'),
       }))
       setImportReport([...localErrors, ...serverRows].sort((a, b) => a.rowNumber - b.rowNumber))
       setImportSummary(`${result.created} employe(s) ajoute(s), ${result.skipped + localErrors.length} ligne(s) ignoree(s).`)
@@ -147,7 +148,7 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
     setCredentialResults([])
     try {
       const result = await employeeService.sendCredentials(target.id)
-      setCredentialSummary(result.status === 'SENT' ? `Identifiants envoyes a ${result.email}.` : result.message)
+      setCredentialSummary(result.status === 'SENT' ? `Identifiants envoyes a ${result.email}.` : describeResultReason(result, `Identifiants non envoyés à ${result.email}.`))
       setEmployees(current => current.map(item => item.id === target.id ? { ...item, hasAccount: true, credentialEmailSentAt: result.sentAt } : item))
       onChange()
     } catch (cause) {
@@ -274,7 +275,7 @@ export function EmployeesManager({ onChange }: { onChange: () => void }) {
       <section className="crud-list-panel" aria-live="polite">
         <div className="employee-list-heading"><div><strong>Employes de l'organisation</strong><small>Le premier envoi cree leur compte utilisateur.</small>{access && !canSendAll && <small>L’envoi groupé concerne toute l’organisation et nécessite le droit de gérer les comptes à cette portée.</small>}</div><button type="button" className="secondary-button" onClick={() => void sendAllCredentials()} disabled={!canSendAll || !!credentialBusy || loading || !employees.length}>{credentialBusy === 'all' ? 'Envoi...' : 'Envoyer à tous (organisation)'}</button></div>
         {credentialSummary && <div className="credential-summary" role="status">{credentialSummary}</div>}
-        {credentialResults.some(row => row.status === 'FAILED') && <div className="credential-failures">{credentialResults.filter(row => row.status === 'FAILED').map(row => <p key={row.employeeId}>{row.email || 'E-mail manquant'}: {row.message}</p>)}</div>}
+        {credentialResults.some(row => row.status === 'FAILED') && <div className="credential-failures">{credentialResults.filter(row => row.status === 'FAILED').map(row => <p key={row.employeeId}>{row.email || 'E-mail manquant'}: {describeResultReason(row, 'Envoi impossible.')}</p>)}</div>}
         {loading ? <div className="empty-state">Chargement des employes...</div> : employees.length ? employees.map(employee => <article className="crud-row employee-row" key={employee.id}><div className="crud-symbol violet">{employee.name.charAt(0).toUpperCase()}</div><div className="crud-row-main"><strong>{employee.name}</strong><small>{employee.email ?? 'E-mail manquant'} - {employee.jobTitle ? `${employee.jobTitle} - ` : ''}{employee.spaceName}</small><small>{employee.credentialEmailSentAt ? `Identifiants envoyes le ${new Date(employee.credentialEmailSentAt).toLocaleDateString('fr-FR')}` : employee.hasAccount ? 'Compte cree, identifiants a envoyer' : 'Aucun compte utilisateur'}</small></div>{canSpace(access, employee.spaceId, 'employee.manage_accounts') && <button type="button" className="secondary-button employee-send-button" onClick={() => void sendEmployeeCredentials(employee)} disabled={!!credentialBusy || inviteLoading}>{credentialBusy === employee.id ? employee.hasAccount ? 'Envoi...' : 'Invitation...' : !employee.hasAccount ? 'Choisir un rôle et inviter' : employee.credentialEmailSentAt ? 'Réinitialiser et renvoyer' : 'Renvoyer les identifiants'}</button>}{inviteEmployeeId === employee.id && <div className="employee-invite-controls"><label htmlFor={`employee-role-${employee.id}`}>Rôle d’accès</label><select id={`employee-role-${employee.id}`} value={inviteRoleId} onChange={event => setInviteRoleId(event.target.value)} disabled={inviteLoading || !inviteRoles.length}><option value="">{inviteLoading ? 'Chargement des rôles…' : 'Choisir un rôle'}</option>{inviteRoles.map(role => <option key={role.id} value={role.id}>{role.name} · {role.scope === 'ORGANIZATION' ? 'Organisation entière' : 'Cet espace'}</option>)}</select>{inviteRoles.find(role => role.id === inviteRoleId)?.scope === 'ORGANIZATION' && <small>Ce rôle accorde ses permissions dans toute l’organisation.</small>}<div><button type="button" className="primary-button" disabled={inviteLoading || !!credentialBusy || !inviteRoleId} onClick={() => void submitEmployeeInvite(employee)}>{credentialBusy === employee.id ? 'Envoi...' : 'Inviter avec ce rôle'}</button><button type="button" className="secondary-button" onClick={() => { setInviteEmployeeId(null); setInviteRoleId(''); setInviteRoles([]) }}>Annuler</button></div></div>}</article>) : <div className="empty-state"><strong>Aucun employe</strong><p>Les employes crees apparaitront ici.</p></div>}
       </section>
     </div>

@@ -26,6 +26,11 @@ export function ProjectsManager({ onChange, access }: { onChange: () => void; ac
   const [poolResources, setPoolResources] = useState<Resource[]>([])
   const [resourceDrafts, setResourceDrafts] = useState<Record<string, ResourceDraft>>({})
   const [resourcesLoading, setResourcesLoading] = useState(false)
+  const canLoadPool = addResources && !!form.spaceId && canSpace(access, form.spaceId, 'project.resources.manage')
+  const poolKey = canLoadPool ? form.spaceId : ''
+  const [loadedPoolKey, setLoadedPoolKey] = useState(poolKey)
+  // Reset while rendering when the input changes (instead of in the effect) so stale data is never shown.
+  if (loadedPoolKey !== poolKey) { setLoadedPoolKey(poolKey); setPoolResources([]); setResourceDrafts({}); setResourcesLoading(canLoadPool) }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -37,19 +42,16 @@ export function ProjectsManager({ onChange, access }: { onChange: () => void; ac
   }, [])
 
   useEffect(() => {
-    setPoolResources([]); setResourceDrafts({})
-    setResourcesLoading(false)
-    if (!addResources || !form.spaceId || !canSpace(access, form.spaceId, 'project.resources.manage')) return
+    if (!poolKey) return
     let active = true
-    setResourcesLoading(true)
-    resourceService.listForSpace(form.spaceId).then(data => {
+    resourceService.listForSpace(poolKey).then(data => {
       if (!active) return
       setPoolResources(data)
       setResourceDrafts({})
     }).catch(cause => { if (active) setError(getApiErrorMessage(cause, 'Impossible de charger le pool de ressources de cet espace.')) })
       .finally(() => { if (active) setResourcesLoading(false) })
     return () => { active = false }
-  }, [addResources, form.spaceId, access])
+  }, [poolKey])
 
   useEffect(() => {
     if (!resourcesProjectId) return

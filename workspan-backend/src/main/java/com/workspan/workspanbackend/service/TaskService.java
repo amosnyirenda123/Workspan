@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.TaskRequest;
 import com.workspan.workspanbackend.dto.TaskResponse;
 import com.workspan.workspanbackend.dto.TaskScheduleRequest;
@@ -11,10 +15,8 @@ import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.repository.TaskDependencyRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
 import com.workspan.workspanbackend.repository.TaskResourceAllocationRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -70,7 +72,7 @@ public class TaskService {
         Project targetProject = requireProject(request.projectId(), organizationId);
         boolean moving = !previousProject.getId().equals(targetProject.getId());
         if (moving && dependencies.existsByPredecessorTaskIdOrSuccessorTaskId(task.getId(), task.getId()))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove this task's dependencies before moving it to another project");
+            throw new ConflictException(ErrorCode.TASK_HAS_DEPENDENCIES);
         Schedule schedule = resolve(request.status(), request.baselineStart(), request.baselineEnd(), request.startDate(), request.endDate(), request.progress(), task.getProgress());
         validateWithinProject(schedule.plannedStart(), schedule.plannedEnd(), targetProject);
         taskResourceService.validateSchedule(task, targetProject, request.status(), schedule.occupancyStart(), schedule.occupancyEnd());
@@ -115,7 +117,7 @@ public class TaskService {
         if ((task.getStatus() == TaskStatus.DONE || effectiveEnd != null && effectiveEnd.isBefore(LocalDate.now()))
                 && taskResourceAllocations.findAllByTaskId(task.getId()).stream()
                 .anyMatch(allocation -> allocation.getProjectResourceAllocation().getResource() instanceof BudgetResource))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A completed task with committed budget cannot be deleted");
+            throw new ConflictException(ErrorCode.TASK_BUDGET_COMMITTED);
         dependencies.deleteAllInvolvingTask(task.getId());
         taskResourceAllocations.deleteAllByTaskId(task.getId());
         tasks.delete(task);
@@ -125,12 +127,12 @@ public class TaskService {
 
     Task requireTask(UUID id, UUID organizationId) {
         return tasks.findByIdAndProjectSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_NOT_FOUND));
     }
 
     private Project requireProject(UUID id, UUID organizationId) {
         return projects.findByIdAndSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
     }
 
     /**
@@ -143,7 +145,7 @@ public class TaskService {
                              Integer requestedProgress, int currentProgress) {
         LocalDate today = LocalDate.now();
         if (plannedStart != null && plannedEnd != null && plannedEnd.isBefore(plannedStart))
-            throw badRequest("The planned end date cannot be before the planned start date");
+            throw new BadRequestException(ErrorCode.PLANNED_DATES_INVALID);
         int progress = requestedProgress != null ? requestedProgress : currentProgress;
         switch (status) {
             case TODO -> { actualStart = null; actualEnd = null; progress = 0; }
@@ -155,24 +157,23 @@ public class TaskService {
                 progress = 100;
             }
         }
-        if (actualStart != null && actualStart.isAfter(today)) throw badRequest("The actual start date cannot be in the future");
-        if (actualEnd != null && actualEnd.isAfter(today)) throw badRequest("The actual end date cannot be in the future");
+        if (actualStart != null && actualStart.isAfter(today)) throw new BadRequestException(ErrorCode.ACTUAL_START_IN_FUTURE);
+        if (actualEnd != null && actualEnd.isAfter(today)) throw new BadRequestException(ErrorCode.ACTUAL_END_IN_FUTURE);
         if (actualStart != null && actualEnd != null && actualEnd.isBefore(actualStart))
-            throw badRequest("The actual end date cannot be before the actual start date");
-        if (progress < 0 || progress > 100) throw badRequest("Progress must be between 0 and 100");
+            throw new BadRequestException(ErrorCode.ACTUAL_DATES_INVALID);
+        if (progress < 0 || progress > 100) throw new BadRequestException(ErrorCode.PROGRESS_OUT_OF_RANGE);
         return new Schedule(plannedStart, plannedEnd, actualStart, actualEnd, progress);
     }
 
     private void validateWithinProject(LocalDate start, LocalDate end, Project project) {
         if (start != null && project.getBaselineStart() != null && start.isBefore(project.getBaselineStart()))
-            throw badRequest("The task's planned start cannot be before the project's planned start");
+            throw new BadRequestException(ErrorCode.TASK_STARTS_BEFORE_PROJECT);
         if (end != null && project.getBaselineEnd() != null && end.isAfter(project.getBaselineEnd()))
-            throw badRequest("The task's planned end cannot be after the project's planned end");
+            throw new BadRequestException(ErrorCode.TASK_ENDS_AFTER_PROJECT);
         if (start != null && project.getBaselineEnd() != null && start.isAfter(project.getBaselineEnd()))
-            throw badRequest("The task's planned start cannot be after the project's planned end");
+            throw new BadRequestException(ErrorCode.TASK_STARTS_AFTER_PROJECT_END);
     }
 
-    private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
 
     TaskResponse response(Task task) {
         return new TaskResponse(task.getId(), task.getProject().getId(), task.getName(), task.getStatus(),

@@ -19,9 +19,11 @@ export type Employee = { id: string; spaceId: string; spaceName: string; name: s
 export type EmployeeRequest = { spaceId: string; name: string; email: string; jobTitle?: string | null }
 export type EmployeeImportRow = EmployeeRequest & { rowNumber: number }
 export type EmployeeImportRequest = { employees: EmployeeImportRow[] }
-export type EmployeeImportRowResult = { rowNumber: number; status: 'CREATED' | 'SKIPPED'; message: string; employee: Employee | null }
+/** `code`/`params` give the reason of a SKIPPED row; translate them with describeResultReason (api/errors). */
+export type EmployeeImportRowResult = { rowNumber: number; status: 'CREATED' | 'SKIPPED'; message: string; employee: Employee | null; code: string | null; params: Record<string, unknown> }
 export type EmployeeImportResponse = { created: number; skipped: number; rows: EmployeeImportRowResult[] }
-export type CredentialDeliveryResult = { employeeId: string; email: string; status: 'SENT' | 'SKIPPED' | 'FAILED'; message: string; sentAt: string | null }
+/** `code`/`params` give the reason of a SKIPPED or FAILED delivery; translate them with describeResultReason (api/errors). */
+export type CredentialDeliveryResult = { employeeId: string; email: string; status: 'SENT' | 'SKIPPED' | 'FAILED'; message: string; sentAt: string | null; code: string | null; params: Record<string, unknown> }
 export type CredentialBatchResponse = { sent: number; skipped: number; failed: number; results: CredentialDeliveryResult[] }
 
 /** baselineStart/baselineEnd = planned dates; startDate/endDate = actual dates (derived from tasks). */

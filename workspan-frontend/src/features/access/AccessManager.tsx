@@ -25,6 +25,13 @@ export function AccessManager() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const contextKey = `${scope}:${contextId}:${currentUserId}`
+  const [loadedContextKey, setLoadedContextKey] = useState(contextKey)
+  // Reset while rendering when the input changes (instead of in the effect) so stale data is never shown.
+  if (loadedContextKey !== contextKey) {
+    setLoadedContextKey(contextKey)
+    if (contextId) { setLoading(true); setError(''); setEditingId(null); setRoleName(''); setSelectedPermissions([]) }
+  }
 
   useEffect(() => {
     let active = true
@@ -69,7 +76,6 @@ export function AccessManager() {
   useEffect(() => {
     if (!contextId) return
     let active = true
-    setLoading(true); setError(''); setEditingId(null); setRoleName(''); setSelectedPermissions([])
     Promise.all([accessService.roles(scope, contextId), accessService.assignments(scope, contextId), accessService.members(scope, contextId)])
       .then(([roleData, assignmentData, memberData]) => {
         if (!active) return

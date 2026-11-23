@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { authService } from './api/authService'
 import { accessService } from './api/accessService'
 import { canOrganization } from './api/accessPermissions'
-import { getApiErrorMessage } from './api/http'
+import { getApiErrorMessage, onSessionExpired } from './api/http'
 import { organizationService } from './api/organizationService'
 import type { AuthUser, EffectiveAccess, Organization } from './api/types'
 import { WorkspaceCrud, type WorkspaceSection } from './features/workspace/WorkspaceCrud'
@@ -11,12 +11,15 @@ import './App.css'
 
 type AuthForm = { organizationName: string; displayName: string; email: string; password: string }
 
+const NO_ORGANIZATIONS: Organization[] = []
+
 
 function App() {
-  const [pathname, setPathname] = useState(() => window.location.pathname)
-  const [organizations, setOrganizations] = useState<Organization[]>([])
-  const [listLoading, setListLoading] = useState(true)
-  const [listError, setListError] = useState('')
+  /** The URL the user asked for; `pathname` below is where they actually land once permission redirects apply. */
+  const [requestedPath, setPathname] = useState(() => window.location.pathname)
+  const [loadedOrganizations, setOrganizations] = useState<Organization[]>([])
+  const [organizationsLoading, setListLoading] = useState(true)
+  const [organizationsError, setListError] = useState('')
   const [search, setSearch] = useState('')
   const [detail, setDetail] = useState<Organization | null>(null)
   const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null)
@@ -26,15 +29,15 @@ function App() {
   const [authSaving, setAuthSaving] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
-  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccess | null>(null)
-  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('overview')
+  /** Access loaded for a given user; it only counts while that user is still the signed-in one. */
+  const [loadedAccess, setLoadedAccess] = useState<{ user: AuthUser; access: EffectiveAccess | null } | null>(null)
+  const [selectedSection, setWorkspaceSection] = useState<WorkspaceSection>('overview')
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
   const [passwordError, setPasswordError] = useState('')
   const [passwordSaving, setPasswordSaving] = useState(false)
+  /** Page to reopen after signing in again when the session expired. */
+  const [returnPath, setReturnPath] = useState<string | null>(null)
 
-  const detailId = pathname === '/organizations/new' ? null : /^\/organizations\/([^/]+)$/.exec(pathname)?.[1] ?? null
-  const isOrganizationsPage = pathname === '/organizations'
-  const isEmployeesPage = pathname === '/employees'
 
   function navigate(path: string) {
     window.history.pushState({}, '', path)
@@ -49,11 +52,15 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!authUser) { setEffectiveAccess(null); return }
+    if (!authUser) return
     let active = true
-    accessService.effective().then(data => { if (active) setEffectiveAccess(data) }).catch(() => { if (active) setEffectiveAccess(null) })
+    accessService.effective()
+      .then(access => { if (active) setLoadedAccess({ user: authUser, access }) })
+      .catch(() => { if (active) setLoadedAccess({ user: authUser, access: null }) })
     return () => { active = false }
   }, [authUser])
+
+  const effectiveAccess = authUser && loadedAccess?.user === authUser ? loadedAccess.access : null
 
   const canViewOrganization = canOrganization(effectiveAccess, 'organization.view')
   const canUseEmployeeSection = ['employee.view', 'employee.create', 'employee.manage_accounts'].some(key => canOrganization(effectiveAccess, key)
@@ -75,31 +82,46 @@ function App() {
     : canUseSpaces ? 'spaces' : canUseProjects ? 'projects' : canUseTasks ? 'tasks' : canUseGantt ? 'gantt'
       : canUseWorkload ? 'workload' : canUseResources ? 'resources' : canUseAccessManagement ? 'access' : canUseAnalytics ? 'analytics' : 'overview'
 
-  useEffect(() => {
-    if (!authUser || !effectiveAccess || !isOrganizationsPage) return
-    const allowed: Record<WorkspaceSection, boolean> = {
-      overview: canViewOrganization, spaces: canUseSpaces, projects: canUseProjects, tasks: canUseTasks,
-      gantt: canUseGantt, workload: canUseWorkload, resources: canUseResources, access: canUseAccessManagement, analytics: canUseAnalytics,
-    }
-    if (allowed[workspaceSection]) return
-    if (canUseEmployeeSection && firstAvailableSection === 'overview') {
-      window.history.replaceState({}, '', '/employees')
-      setPathname('/employees')
-    }
-    else setWorkspaceSection(firstAvailableSection)
-  }, [authUser, effectiveAccess, isOrganizationsPage, workspaceSection, canViewOrganization, canUseSpaces, canUseProjects, canUseTasks, canUseGantt, canUseWorkload, canUseResources, canUseAccessManagement, canUseAnalytics, canUseEmployeeSection, firstAvailableSection])
+  const sectionAllowed: Record<WorkspaceSection, boolean> = {
+    overview: canViewOrganization, spaces: canUseSpaces, projects: canUseProjects, tasks: canUseTasks,
+    gantt: canUseGantt, workload: canUseWorkload, resources: canUseResources, access: canUseAccessManagement, analytics: canUseAnalytics,
+  }
+  const accessKnown = !!authUser && !!effectiveAccess
+  // A section the user cannot open falls back to the first one they can.
+  const workspaceSection: WorkspaceSection = !accessKnown || sectionAllowed[selectedSection] ? selectedSection : firstAvailableSection
+  // Users without any workspace section but with employee rights land on /employees, and vice versa.
+  const pathname = !accessKnown ? requestedPath
+    : requestedPath === '/organizations' && !sectionAllowed[selectedSection] && firstAvailableSection === 'overview' && !canViewOrganization && canUseEmployeeSection ? '/employees'
+      : requestedPath === '/employees' && !canUseEmployeeSection ? '/organizations'
+        : requestedPath
+  const detailId = pathname === '/organizations/new' ? null : /^\/organizations\/([^/]+)$/.exec(pathname)?.[1] ?? null
+  const isOrganizationsPage = pathname === '/organizations'
+  const isEmployeesPage = pathname === '/employees'
 
+  // Keep the address bar on the page actually shown (cheap check, so it runs after every render).
   useEffect(() => {
-    if (authUser && effectiveAccess && isEmployeesPage && !canUseEmployeeSection) {
-      window.history.replaceState({}, '', '/organizations')
-      setPathname('/organizations')
-    }
-  }, [authUser, effectiveAccess, isEmployeesPage, canUseEmployeeSection])
+    if (pathname !== window.location.pathname) window.history.replaceState({}, '', pathname)
+  })
 
   function openWorkspaceSection(section: WorkspaceSection) {
     setWorkspaceSection(section)
     if (!isOrganizationsPage) navigate('/organizations')
   }
+
+  useEffect(() => onSessionExpired(() => {
+    const current = window.location.pathname
+    const protectedPage = current.startsWith('/organizations') || current === '/employees'
+    setReturnPath(protectedPage ? current : null)
+    setAuthUser(null)
+    setOrganizations([])
+    setDetail(null)
+    setAuthMode('organization')
+    setAuthForm(form => ({ ...form, password: '' }))
+    setAuthError('Votre session a expiré. Reconnectez-vous pour continuer.')
+    // Client-side navigation (not a reload) so the message above stays visible on the login page.
+    window.history.pushState({}, '', '/login')
+    setPathname('/login')
+  }), [])
 
   useEffect(() => {
     let active = true
@@ -142,7 +164,7 @@ function App() {
   useEffect(() => {
     if (!authUser || !isOrganizationsPage) return
     if (!effectiveAccess) return
-    if (!canViewOrganization) { setListLoading(false); setOrganizations([]); setListError(''); return }
+    if (!canViewOrganization) return
     const controller = new AbortController()
     organizationService.list({ signal: controller.signal })
       .then(data => {
@@ -181,7 +203,8 @@ function App() {
     try {
       const user = registering ? await authService.register(authForm) : await authService.login({ email: authForm.email, password: authForm.password })
       setAuthUser(user)
-      navigate(user.mustChangePassword ? '/change-password' : '/organizations')
+      navigate(user.mustChangePassword ? '/change-password' : returnPath ?? '/organizations')
+      setReturnPath(null)
     } catch (cause) {
       setAuthError(getApiErrorMessage(cause, 'Impossible de vous connecter.'))
     } finally { setAuthSaving(false) }
@@ -207,6 +230,10 @@ function App() {
     }
   }
 
+  const organizations = canViewOrganization ? loadedOrganizations : NO_ORGANIZATIONS
+  const listLoading = canViewOrganization && organizationsLoading
+  const listError = canViewOrganization ? organizationsError : ''
+
   const totals = useMemo(() => organizations.reduce((sum, organization) => ({
     spaces: sum.spaces + organization.spaces,
     projects: sum.projects + organization.projects,
@@ -224,6 +251,7 @@ function App() {
     await authService.logout().catch(() => undefined)
     setAuthUser(null)
     setOrganizations([])
+    setReturnPath(null)
     navigate('/')
   }
 

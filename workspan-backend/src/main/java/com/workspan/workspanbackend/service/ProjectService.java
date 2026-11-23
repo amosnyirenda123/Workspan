@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.ProjectRequest;
 import com.workspan.workspanbackend.dto.ProjectResponse;
 import com.workspan.workspanbackend.entity.Project;
@@ -11,11 +15,10 @@ import com.workspan.workspanbackend.entity.Space;
 import com.workspan.workspanbackend.repository.ProjectRepository;
 import com.workspan.workspanbackend.repository.ProjectResourceAllocationRepository;
 import com.workspan.workspanbackend.repository.SpaceRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import java.time.LocalDate;
@@ -54,7 +57,7 @@ public class ProjectService {
         Project project = requireProject(id, organizationId);
         Space nextSpace = requireSpace(request.spaceId(), organizationId);
         if (!project.getSpace().getId().equals(nextSpace.getId()) && allocations.existsByProjectId(id))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Remove project resources before moving it to another space");
+            throw new ConflictException(ErrorCode.PROJECT_HAS_RESOURCES);
         validateDates(request.baselineStart(), request.baselineEnd());
         validateResourceSchedule(project, ScheduleDates.earliest(request.baselineStart(), project.getStartDate()),
                 project.getEndDate() != null ? project.getEndDate() : request.baselineEnd());
@@ -70,17 +73,17 @@ public class ProjectService {
 
     private Project requireProject(UUID id, UUID organizationId) {
         return projects.findByIdAndSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
     }
 
     private Space requireSpace(UUID id, UUID organizationId) {
         return spaces.findByIdAndOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Space not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.SPACE_NOT_FOUND));
     }
 
     private void validateDates(java.time.LocalDate start, java.time.LocalDate end) {
         if (start != null && end != null && end.isBefore(start))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The planned end date cannot be before the planned start date");
+            throw new BadRequestException(ErrorCode.PLANNED_DATES_INVALID);
     }
 
     /** nextStart / nextEnd are the project's occupancy window after the change (actual when known, otherwise planned). */
@@ -93,7 +96,7 @@ public class ProjectService {
             if (own.getResource() instanceof EquipmentResource equipment) {
                 long booked = overlaps.stream().mapToLong(other -> other.getAllocatedQuantity() == null ? 0 : other.getAllocatedQuantity()).sum();
                 if (booked + (own.getAllocatedQuantity() == null ? 0 : own.getAllocatedQuantity()) > equipment.getQuantity())
-                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Project dates exceed equipment availability for " + own.getResource().getName());
+                    throw new ConflictException(ErrorCode.PROJECT_DATES_EXCEED_EQUIPMENT, Map.of("resource", own.getResource().getName()));
             }
         }
     }

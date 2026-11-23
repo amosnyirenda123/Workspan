@@ -1,5 +1,9 @@
 package com.workspan.workspanbackend.service;
 
+import com.workspan.workspanbackend.exception.BadRequestException;
+import com.workspan.workspanbackend.exception.ConflictException;
+import com.workspan.workspanbackend.exception.ErrorCode;
+import com.workspan.workspanbackend.exception.NotFoundException;
 import com.workspan.workspanbackend.dto.GanttResponse;
 import com.workspan.workspanbackend.dto.GanttResponse.TaskRow;
 import com.workspan.workspanbackend.dto.LevelingProposal;
@@ -20,10 +24,8 @@ import com.workspan.workspanbackend.repository.ResourceRepository;
 import com.workspan.workspanbackend.repository.TaskRepository;
 import com.workspan.workspanbackend.repository.TaskResourceAllocationRepository;
 import org.hibernate.Hibernate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -178,8 +180,8 @@ public class WorkloadService {
         Project project = task.getProject();
         Context context = context(project.getSpace().getId(), LocalDate.now());
         Item item = context.items.stream().filter(candidate -> candidate.task.getId().equals(taskId) && candidate.resource.getId().equals(resourceId)).findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task assignment not found"));
-        if (!(item.resource instanceof HumanResource)) throw badRequest("Only employee assignments can be reassigned");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_ASSIGNMENT_NOT_FOUND));
+        if (!(item.resource instanceof HumanResource)) throw new BadRequestException(ErrorCode.ONLY_EMPLOYEES_REASSIGNABLE);
         Set<UUID> onTask = context.items.stream().filter(other -> other.task.getId().equals(taskId)).map(other -> other.resource.getId()).collect(java.util.stream.Collectors.toSet());
         Set<UUID> pool = projectPoolResourceIds(project.getId());
         List<WorkloadRequests.Candidate> result = new ArrayList<>();
@@ -214,25 +216,25 @@ public class WorkloadService {
     @Transactional
     public void reassign(UUID organizationId, WorkloadRequests.Reassign request) {
         Task task = taskService.requireTask(request.taskId(), organizationId);
-        if (task.getStatus() == TaskStatus.DONE) throw conflict("A completed task cannot be reassigned");
-        if (request.fromResourceId().equals(request.toResourceId())) throw badRequest("Choose another employee");
+        if (task.getStatus() == TaskStatus.DONE) throw new ConflictException(ErrorCode.COMPLETED_TASK_NOT_REASSIGNABLE);
+        if (request.fromResourceId().equals(request.toResourceId())) throw new BadRequestException(ErrorCode.SAME_EMPLOYEE_REASSIGNMENT);
         Project project = task.getProject();
         ProjectResourceAllocation fromPool = projectAllocations.findByProjectIdAndResourceId(project.getId(), request.fromResourceId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task assignment not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_ASSIGNMENT_NOT_FOUND));
         TaskResourceAllocation assignment = taskAllocations.findByTaskIdAndProjectResourceAllocationId(task.getId(), fromPool.getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task assignment not found"));
-        if (real(fromPool.getResource()).getType() != ResourceType.HUMAN) throw badRequest("Only employee assignments can be reassigned");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_ASSIGNMENT_NOT_FOUND));
+        if (real(fromPool.getResource()).getType() != ResourceType.HUMAN) throw new BadRequestException(ErrorCode.ONLY_EMPLOYEES_REASSIGNABLE);
         Resource target = resources.findById(request.toResourceId()).map(WorkloadService::real)
                 .filter(resource -> resource.getSpace().getId().equals(project.getSpace().getId()) && resource.getType() == ResourceType.HUMAN)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found in this space"));
-        if (!"AVAILABLE".equalsIgnoreCase(target.getStatus())) throw conflict("This employee is not available");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.EMPLOYEE_NOT_IN_SPACE));
+        if (!"AVAILABLE".equalsIgnoreCase(target.getStatus())) throw new ConflictException(ErrorCode.EMPLOYEE_UNAVAILABLE);
         ProjectResourceAllocation toPool = projectAllocations.findByProjectIdAndResourceId(project.getId(), target.getId()).orElseGet(() -> {
             ProjectResourceAllocation created = new ProjectResourceAllocation();
             created.setProject(project); created.setResource(target);
             return projectAllocations.saveAndFlush(created);
         });
         if (taskAllocations.findByTaskIdAndProjectResourceAllocationId(task.getId(), toPool.getId()).isPresent())
-            throw conflict(target.getName() + " is already assigned to this task");
+            throw new ConflictException(ErrorCode.EMPLOYEE_ALREADY_ON_TASK, Map.of("employee", target.getName()));
         assignment.setProjectResourceAllocation(toPool);
         if (assignment.getAllocationPercent() == null) assignment.setAllocationPercent(100);
         taskAllocations.save(assignment);
@@ -248,14 +250,14 @@ public class WorkloadService {
     }
 
     private void shiftTask(Task task, int days, boolean freeMarginOnly) {
-        if (!isNotStarted(task)) throw conflict("Only a task that has not started can be shifted: \"" + task.getName() + "\"");
+        if (!isNotStarted(task)) throw new ConflictException(ErrorCode.TASK_ALREADY_STARTED, Map.of("task", task.getName()));
         TaskRow row = gantt.compute(task.getProject(), LocalDate.now()).tasks().stream().filter(item -> item.id().equals(task.getId())).findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
-        if (!row.scheduled() || row.forecastStart() == null) throw badRequest("The task \"" + task.getName() + "\" has no planned dates");
+                .orElseThrow(() -> new NotFoundException(ErrorCode.TASK_NOT_FOUND));
+        if (!row.scheduled() || row.forecastStart() == null) throw new BadRequestException(ErrorCode.TASK_NOT_SCHEDULED, Map.of("task", task.getName()));
         Long margin = freeMarginOnly ? row.freeFloatDays() : row.totalFloatDays();
         if (margin == null || days > margin)
-            throw conflict("Shifting \"" + task.getName() + "\" by " + days + " day(s) exceeds its " + (freeMarginOnly ? "free" : "total") + " margin ("
-                    + (margin == null ? 0 : margin) + " day(s)). Recompute the proposal.");
+            throw new ConflictException(ErrorCode.SHIFT_EXCEEDS_MARGIN, Map.of("task", task.getName(), "days", days,
+                    "marginType", freeMarginOnly ? "free" : "total", "margin", margin == null ? 0 : margin));
         taskService.applySchedule(task, row.forecastStart().plusDays(days), row.forecastEnd().plusDays(days), null, null, task.getProgress());
     }
 
@@ -379,14 +381,14 @@ public class WorkloadService {
         for (WorkloadRequests.LevelingAction action : actions) {
             switch (action.type()) {
                 case "SHIFT" -> {
-                    if (action.shiftDays() == null || action.shiftDays() < 1) throw badRequest("Invalid shift");
+                    if (action.shiftDays() == null || action.shiftDays() < 1) throw new BadRequestException(ErrorCode.INVALID_SHIFT);
                     shiftTask(taskService.requireTask(action.taskId(), organizationId), action.shiftDays(), true);
                 }
                 case "REASSIGN" -> {
-                    if (action.fromResourceId() == null || action.toResourceId() == null) throw badRequest("Invalid reassignment");
+                    if (action.fromResourceId() == null || action.toResourceId() == null) throw new BadRequestException(ErrorCode.INVALID_REASSIGNMENT);
                     reassign(organizationId, new WorkloadRequests.Reassign(action.taskId(), action.fromResourceId(), action.toResourceId()));
                 }
-                default -> throw badRequest("Unknown action " + action.type());
+                default -> throw new BadRequestException(ErrorCode.UNKNOWN_LEVELING_ACTION, Map.of("action", String.valueOf(action.type())));
             }
             applied++;
         }
@@ -523,19 +525,17 @@ public class WorkloadService {
     private static Range range(LocalDate from, LocalDate to, LocalDate today) {
         LocalDate start = from != null ? from : today.minusDays(7);
         LocalDate end = to != null ? to : start.plusDays(62);
-        if (end.isBefore(start)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The end of the period cannot be before its start");
+        if (end.isBefore(start)) throw new BadRequestException(ErrorCode.PERIOD_INVALID);
         if (end.toEpochDay() - start.toEpochDay() + 1 > MAX_RANGE_DAYS) end = start.plusDays(MAX_RANGE_DAYS - 1);
         return new Range(start.toEpochDay(), end.toEpochDay());
     }
 
     private Project requireProject(UUID id, UUID organizationId) {
         return projects.findByIdAndSpaceOrganizationId(id, organizationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+                .orElseThrow(() -> new NotFoundException(ErrorCode.PROJECT_NOT_FOUND));
     }
 
     private static LocalDate date(Long epochDay) { return epochDay == null ? null : LocalDate.ofEpochDay(epochDay); }
-    private static ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
-    private static ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
 
     /** Inclusive range of epoch days. */
     private static final class Range {
